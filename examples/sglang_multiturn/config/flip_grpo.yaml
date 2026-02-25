@@ -1,0 +1,113 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  # Data paths - will be overridden by command line
+  train_files: null
+  val_files: null
+  
+  # Tokenization settings
+  max_prompt_length: 16384
+  max_response_length: 1024
+  
+  # Batch settings
+  train_batch_size: 4  # Reduced for testing
+  val_batch_size: 4
+  
+  # Key names in your parquet
+  prompt_key: 'prompt'
+  response_key: 'answer'
+  
+  # Processing options
+  return_raw_chat: True  # Important for multi-turn with images
+  filter_overlong_prompts: False
+  truncation: 'error'
+  
+  # Dataset worker settings
+  num_workers: 0  # Single worker for debugging
+  prefetch_factor: null
+
+actor_rollout_ref:
+  hybrid_engine: True
+  
+  # Actor config
+  actor:
+    _target_: verl.workers.config.actor.FSDPActorConfig
+    ppo_mini_batch_size: 4  # Match train_batch_size
+    ppo_micro_batch_size_per_gpu: 2  # Must divide ppo_mini_batch_size
+    use_dynamic_bsz: False
+    optim:
+      lr: 1e-6
+    use_kl_loss: True
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config:
+      param_offload: True
+      optimizer_offload: True
+  
+  # Model config
+  model:
+    path: 'Qwen/Qwen2.5-VL-3B-Instruct'
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+    # custom_chat_template will be set via command line from slurm script
+  
+  # Rollout config
+  rollout:
+    name: sglang
+    mode: async
+    gpu_memory_utilization: 0.5
+    n: 4  # Reduced rollout samples for testing
+    log_prob_micro_batch_size_per_gpu: 2
+    tensor_model_parallel_size: 1
+    multi_turn:
+      enable: True
+      max_assistant_turns: 5
+      tool_config_path: null  # Will be set via command line
+      format: hermes  # Use <tool_call> format for tool parsing
+    trace:
+      backend: tensorboard
+      token2text: True
+  
+  # Reference model config
+  ref:
+    log_prob_micro_batch_size_per_gpu: 2
+    fsdp_config:
+      param_offload: True
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: False
+
+trainer:
+  critic_warmup: 0
+  logger: ["console", "tensorboard"]
+  project_name: 'multimodal_tool_example'
+  experiment_name: 'image_flip_tool_single_gpu_example'
+  n_gpus_per_node: 1
+  nnodes: 1
+  save_freq: -1  # -1 means don't save intermediate checkpoints
+  test_freq: 10  # Validate every 10 steps
+  total_training_steps: 50
+  total_epochs: 10
+  default_local_dir: null  # Will be set via command line
+  
+  # Logging configuration
+  log_freq: 1  # Log metrics every step
+  val_before_train: True  # Run validation before training starts
+
+# Reward model config - keeping it disabled as per your setup
+reward_model:
+  enable: False
+  reward_manager: naive
+  micro_batch_size_per_gpu: 1
+  model:
+    path: /iopsstor/scratch/cscs/abollengier/models/FsfairX-LLaMA3-RM-v0.1
+    input_tokenizer: /iopsstor/scratch/cscs/abollengier/models/FsfairX-LLaMA3-RM-v0.1
+    local_files_only: True

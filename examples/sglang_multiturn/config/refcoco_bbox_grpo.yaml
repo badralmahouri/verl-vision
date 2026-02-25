@@ -1,0 +1,110 @@
+# refcoco_bbox_grpo.yaml
+# Training config for RefCOCO bbox task (real-world object localization)
+
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  # Data paths for RefCOCO bbox task
+  train_files: null  # Set via command line
+  val_files: null    # Set via command line
+  
+  # Tokenization settings
+  max_prompt_length: 16384
+  max_response_length: 1024
+  
+  # Batch settings - adjust based on GPU memory
+  train_batch_size: 32
+  val_batch_size: 16
+  
+  # Key names in parquet
+  prompt_key: 'prompt'
+  response_key: 'answer'
+  
+  # Processing options
+  return_raw_chat: True  # Required for multi-turn with images
+  filter_overlong_prompts: False
+  truncation: 'error'
+  
+  # Image handling
+  image_key: images
+  
+  # Dataset worker settings
+  num_workers: 4
+  prefetch_factor: 2
+
+actor_rollout_ref:
+  hybrid_engine: True
+  
+  # Actor config
+  actor:
+    _target_: verl.workers.config.actor.FSDPActorConfig
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size_per_gpu: 8
+    use_dynamic_bsz: False
+    optim:
+      lr: 1e-6
+    use_kl_loss: True
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config:
+      param_offload: True
+      optimizer_offload: True
+  
+  # Model config - using Qwen2.5-VL for vision-language capabilities
+  model:
+    path: 'Qwen/Qwen2.5-VL-3B-Instruct'  # Can upgrade to 7B with more GPUs
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+  
+  # Rollout config
+  rollout:
+    name: sglang
+    mode: async
+    gpu_memory_utilization: 0.5
+    n: 4  # Number of rollout samples per prompt
+    log_prob_micro_batch_size_per_gpu: 2
+    tensor_model_parallel_size: 1
+    multi_turn:
+      enable: True
+      max_assistant_turns: 3  # Reduced since bbox task is simpler
+      tool_config_path: null  # Set via command line
+      format: hermes
+    trace:
+      backend: tensorboard
+      token2text: True
+  
+  # Reference model config
+  ref:
+    log_prob_micro_batch_size_per_gpu: 2
+    fsdp_config:
+      param_offload: True
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: True
+
+trainer:
+  critic_warmup: 0
+  logger: ["console", "tensorboard"]
+  project_name: 'refcoco_bbox_training'
+  experiment_name: 'refcoco_bbox_spatial_learning'
+  n_gpus_per_node: 1
+  nnodes: 1
+  save_freq: 50
+  test_freq: 25
+  total_training_steps: 1000
+  total_epochs: 10
+  default_local_dir: null  # Set via command line
+  log_freq: 1
+  val_before_train: True
+
+# Reward model config - disabled, using rule-based rewards
+reward_model:
+  enable: False

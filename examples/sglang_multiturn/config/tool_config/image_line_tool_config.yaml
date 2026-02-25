@@ -1,0 +1,42 @@
+# image_line_tool_config.yaml
+# Standalone tool config for image line tool only.
+# 
+# REWARD FLOW:
+# 1. create() receives expected_tool_calls from tools_kwargs in dataset
+# 2. execute() computes step_reward based on coordinate similarity
+# 3. calc_reward() computes final reward at end of rollout
+# 4. reward_line.py (via compute_score.py) computes external reward for GRPO
+
+tools:
+  - class_name: verl.tools.image_line_tool.ImageLineTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+      # Enable calc_reward to be called at end of rollout
+      enable_calc_reward: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_line_tool"
+        description: "Draws a straight line on a specific region of an image based on start and end coordinates."
+        parameters:
+          type: "object"
+          properties:
+            start:
+              type: "array"
+              items:
+                type: "number"
+              minItems: 2
+              maxItems: 2
+              description: "The starting point of the line, as [x1, y1] coordinates."
+            end:
+              type: "array"
+              items:
+                type: "number"
+              minItems: 2
+              maxItems: 2
+              description: "The ending point of the line, as [x2, y2] coordinates."
+          required: ["start", "end"]

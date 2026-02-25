@@ -1,0 +1,146 @@
+# multimodal_tool_config.yaml
+# Activates and configures multimodal tools for the VLM.
+
+tools:
+  - class_name: verl.tools.image_bbox_tool.ImageBBoxTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_bbox_tool"
+        description: "Draws a bounding box on a specific region of an image based on a bounding box (bbox) and an optional object label."
+        parameters:
+          type: "object"
+          properties:
+            bbox_2d:
+              type: "array"
+              items:
+                type: "number"
+              minItems: 4
+              maxItems: 4
+              description: "The bounding box of the region to draw, as [x1, y1, x2, y2], where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner."
+            label:
+              type: "string"
+              description: "The name or label of the object in the specified bounding box (optional)."
+          required: ["bbox_2d"]
+
+  - class_name: verl.tools.image_zoom_in_tool.ImageZoomInTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_zoom_in_tool"
+        description: "Zoom in on a specific region of an image by cropping it based on a bounding box (bbox)."
+        parameters:
+          type: "object"
+          properties:
+            bbox_2d:
+              type: "array"
+              items:
+                type: "number"
+              minItems: 4
+              maxItems: 4
+              description: "The bounding box of the region to zoom in, as [x1, y1, x2, y2], where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner."
+            label:
+              type: "string"
+              description: "The name or label of the object in the specified bounding box (optional)."
+          required: ["bbox_2d"]
+
+  - class_name: verl.tools.image_flip_tool.ImageFlipTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_flip_tool"
+        description: "Flip an image horizontally or vertically."
+        parameters:
+          type: "object"
+          properties:
+            direction:
+              type: "string"
+              enum: ["horizontal", "vertical"]
+              description: "The direction in which to flip the image."
+          required: ["direction"]
+
+  - class_name: verl.tools.image_rotate_tool.ImageRotateTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_rotate_tool"
+        description: "Rotate an image by a specified angle in degrees (clockwise)."
+        parameters:
+          type: "object"
+          properties:
+            angle:
+              type: "integer"
+              description: "The angle in degrees to rotate the image clockwise. Common values: 90, 180, 270."
+          required: ["angle"]
+
+  - class_name: verl.tools.image_blur_tool.ImageBlurTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_blur_tool"
+        description: "Apply blur effects to an image. Use blur types (gaussian, box, motion) to blur images."
+        parameters:
+          type: "object"
+          properties:
+            blur_type:
+              type: "string"
+              enum: ["gaussian", "box", "motion"]
+              description: "The type of blur to apply: 'gaussian', 'box', or 'motion'."
+            intensity:
+              type: "integer"
+              description: "The intensity of the effect (1-10). Higher values mean stronger effect."
+          required: ["blur_type", "intensity"]
+
+  - class_name: verl.tools.image_blur_tool.ImageUnblurTool
+    config:
+      type: "native"
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      enable_global_rate_limit: True
+    tool_schema:
+      type: "function"
+      function:
+        name: "image_unblur_tool"
+        description: "Apply sharpening (unblur) operations to an image to recover details from previously blurred inputs."
+        parameters:
+          type: "object"
+          properties:
+            blur_type:
+              type: "string"
+              enum: ["sharpen", "unsharp_mask", "edge_enhance"]
+              description: "The type of unblur/sharpen to apply: 'sharpen', 'unsharp_mask', or 'edge_enhance'."
+            intensity:
+              type: "integer"
+              description: "The intensity of the effect (1-10). Higher values mean stronger effect."
+          required: ["blur_type", "intensity"]

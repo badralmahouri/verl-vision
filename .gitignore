@@ -129,8 +129,8 @@ logs
 log
 outputs
 .history
-.github/copilot-instructions.md
-.gitignore
+
+# Project-specific
 slurm/slurm/
 notebooks/data_image.ipynb
 scripts/Alexis/data_bbox.py

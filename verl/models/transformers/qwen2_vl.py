@@ -340,16 +340,11 @@ def _get_input_embeds(
     pixel_values_videos: Optional[torch.FloatTensor] = None,
     image_grid_thw: Optional[torch.LongTensor] = None,
     video_grid_thw: Optional[torch.LongTensor] = None,
-    cached_image_embeds: Optional[torch.FloatTensor] = None,
 ):
     inputs_embeds = model.get_input_embeddings()(input_ids)
-    if pixel_values is not None or cached_image_embeds is not None:
-        if cached_image_embeds is not None:
-            image_embeds = cached_image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
-        else:
-            pixel_values = pixel_values.type(model.visual.dtype)
-            image_embeds = model.visual(pixel_values, grid_thw=image_grid_thw)
-        
+    if pixel_values is not None:
+        pixel_values = pixel_values.type(model.visual.dtype)
+        image_embeds = model.visual(pixel_values, grid_thw=image_grid_thw)
         n_image_tokens = (input_ids == model.config.image_token_id).sum().item()
         n_image_features = image_embeds.shape[0]
         if n_image_tokens != n_image_features:
@@ -362,6 +357,7 @@ def _get_input_embeds(
         mask_expanded = mask_unsqueezed.expand_as(inputs_embeds)
         image_mask = mask_expanded.to(inputs_embeds.device)
 
+        image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
         inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
     if pixel_values_videos is not None:

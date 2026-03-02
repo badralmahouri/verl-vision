@@ -9,6 +9,9 @@ mkdir -p ${log_dir}
 timestamp=$(date +"%Y%m%d%H%M%S")
 log_file="${log_dir}/qwen3-8b_tq_${timestamp}.log"
 
+# You may try to enable zero-copy serialization for TransferQueue when using SimpleStorageUnit backend.
+export TQ_ZERO_COPY_SERIALIZATION=False
+
 rollout_mode="async"
 rollout_name="vllm" # sglang or vllm
 if [ "$rollout_mode" = "async" ]; then
@@ -63,7 +66,5 @@ python3 -m recipe.transfer_queue.main_ppo \
     trainer.total_epochs=15 \
     trainer.total_training_steps=2 \
     trainer.val_before_train=False \
-    +trainer.num_global_batch=1 \
-    +trainer.num_data_storage_units=8 \
     2>&1 | tee "$log_file"
 echo "Finished, log is saved in: $log_file"

@@ -344,7 +344,7 @@ def create_sample(idx, output_dir, scene_generators):
     return {
         "prompt": prompt,
         "answer": answer,
-        "images": [{"image": img_abs}],
+        "images": [img_abs],
         "expected_tool_calls": expected_tool_calls,
         "metadata": metadata,
         "data_source": "blur",

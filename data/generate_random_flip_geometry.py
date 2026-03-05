@@ -375,7 +375,7 @@ def main():
         row = {
             "prompt": prompt,
             "answer": answer,
-            "images": [{"image": img_abs}],
+            "images": [img_abs],
             "expected_tool_calls": expected_tool_calls,
             "metadata": {**metadata, "tools_kwargs": tools_kwargs},
             "data_source": "flip",

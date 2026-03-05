@@ -273,7 +273,7 @@ def create_mixed_sample(ref_data, images_dir, images_out_dir, clean_images_out_d
     return {
         "prompt": prompt,
         "answer": answer,
-        "images": [{"image": corrupt_path}],
+        "images": [corrupt_path],
         "metadata": metadata,
         "data_source": "refcoco_mixed_tools",
         "reward_model": reward_model,

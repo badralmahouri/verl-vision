@@ -331,7 +331,7 @@ def create_bbox_sample(ref_data, images_dir, task_type="bbox"):
         "prompt": prompt,
         # For refcoco we don't require a boxed textual answer — reward is IoU/tool-use based
         "answer": "",
-        "images": [{"image": img_abs}],
+        "images": [img_abs],
         "metadata": metadata,
         "data_source": f"refcoco_{task_type}",
         "reward_model": reward_model,

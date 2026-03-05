@@ -20,7 +20,7 @@ source ~/miniconda3/etc/profile.d/conda.sh || source ~/anaconda3/etc/profile.d/c
 conda activate verl
 
 # --- Environment setup ---
-cd /users/$USER/verl-main
+cd /users/$USER/verl-vision
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
@@ -45,19 +45,19 @@ export RAY_TASK_IGNORE_ERRORS=0
 export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
-export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-main:${PYTHONPATH:-}"
+export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
 
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
 ulimit -n 65535
-BASE="/users/$USER/verl-main"
+BASE="/users/$USER/verl-vision"
 
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
 TOOL_CONFIG_PATH="$BASE/examples/sglang_multiturn/config/multimodal_tool_config.yaml"
 
-TRAIN_FILE="/users/$USER/verl-main/data/blur/train.parquet"
-VAL_FILE="/users/$USER/verl-main/data/blur/test.parquet"
+TRAIN_FILE="/users/$USER/verl-vision/data/blur/train.parquet"
+VAL_FILE="/users/$USER/verl-vision/data/blur/test.parquet"
 
 if [ -f "$TRAIN_FILE" ]; then
     SIZE=$(du -h "$TRAIN_FILE" | cut -f1)

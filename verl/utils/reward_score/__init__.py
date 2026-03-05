@@ -102,7 +102,34 @@ def default_compute_score(
         from . import search_r1_like_qa_em
 
         res = search_r1_like_qa_em.compute_score(solution_str, ground_truth)
+    elif data_source == "blur":
+        from . import reward_blur
 
+        res = reward_blur.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source == "line":
+        from . import reward_line
+
+        res = reward_line.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source == "flip":
+        from . import reward_flip
+
+        res = reward_flip.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source == "bbox":
+        from . import reward_bbox
+
+        res = reward_bbox.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source == "crop":
+        from . import reward_crop
+
+        res = reward_crop.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source in ["refcoco_bbox", "refcoco_crop"]:
+        from . import reward_refcoco
+
+        res = reward_refcoco.compute_score(solution_str, ground_truth, data_source=data_source, extra_info=extra_info)
+    elif data_source == "refcoco_mixed_tools":
+        from . import reward_mix_refcoco
+
+        res = reward_mix_refcoco.compute_score(solution_str, ground_truth, data_source=data_source, extra_info=extra_info)
     else:
         raise NotImplementedError(f"Reward function is not implemented for {data_source=}")
 

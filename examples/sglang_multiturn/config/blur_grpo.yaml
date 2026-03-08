@@ -70,6 +70,8 @@ actor_rollout_ref:
       max_assistant_turns: 5
       tool_config_path: null  # Will be set via command line
       format: hermes
+    agent:
+      num_workers: 2
     trace:
       backend: tensorboard
       token2text: True

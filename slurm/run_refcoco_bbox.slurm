@@ -9,8 +9,8 @@
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
 #SBATCH --gpus-per-node=1
-#SBATCH --output=%x.out
-#SBATCH --error=%x.err
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 
 set -euo pipefail
 set -o pipefail
@@ -18,7 +18,7 @@ source ~/miniconda3/etc/profile.d/conda.sh || source ~/anaconda3/etc/profile.d/c
 conda activate verl
 
 # --- Environment setup ---
-cd /users/$USER/verl-main
+cd /users/$USER/verl-vision
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
@@ -46,13 +46,13 @@ export RAY_TASK_IGNORE_ERRORS=0
 export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
-export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-main:${PYTHONPATH:-}"
+export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
 
 ulimit -n 65535
-BASE="/users/$USER/verl-main"
+BASE="/users/$USER/verl-vision"
 
 # --- Configuration paths ---
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
@@ -60,8 +60,8 @@ TOOL_CONFIG_PATH="$BASE/examples/sglang_multiturn/config/bbox_only_tool_config.y
 CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/qwen_vl_tool_chat_template.jinja2"
 
 
-TRAIN_FILE="/users/abollengier/verl-main/data/refcoco/bbox/train.parquet"
-VAL_FILE="/users/abollengier/verl-main/data/refcoco/bbox/test.parquet"
+TRAIN_FILE="/users/$USER/verl-vision/data/refcoco/bbox/train.parquet"
+VAL_FILE="/users/$USER/verl-vision/data/refcoco/bbox/test.parquet"
 
 ERROR_COUNT=0
 
@@ -117,7 +117,9 @@ export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 echo "Custom chat template set: $VERL_CUSTOM_CHAT_TEMPLATE_PATH"
 
 # --- Run training ---
-python3 /users/$USER/verl-main/data_postprocess/verl_metrics.py \
+EXPERIMENT_NAME="refcoco_bbox_spatial_$(date +%Y%m%d_%H%M%S)"
+
+python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     --config-path="$CONFIG_PATH" \
     --config-name='refcoco_bbox_grpo' \
     data.prompt_key='prompt' \
@@ -128,12 +130,19 @@ python3 /users/$USER/verl-main/data_postprocess/verl_metrics.py \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
     trainer.default_local_dir="$SCRATCH/checkpoint/refcoco_bbox" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
-
-EXPERIMENT_NAME="refcoco_bbox_spatial_$(date +%Y%m%d_%H%M%S)"
-export EXPERIMENT_NAME
-
     trainer.project_name='refcoco_bbox_training' \
     trainer.experiment_name="$EXPERIMENT_NAME" \
     "$@"
 
 echo "Training completed!"
+
+# --- Metrics extraction ---
+# Strips ANSI color codes from SLURM output, keeps only step metric lines.
+# Named with job ID so re-runs never overwrite. Delete stale logs manually.
+# To plot: python slurm/plot.py slurm/logs/metrics_refcoco_bbox_${SLURM_JOB_ID}.log
+OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+METRICS_LOG="${BASE}/slurm/logs/metrics_refcoco_bbox_${SLURM_JOB_ID}.log"
+mkdir -p "${BASE}/slurm/logs"
+sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
+echo "Metrics saved to: $METRICS_LOG"
+echo "To plot: python slurm/plot.py $METRICS_LOG"

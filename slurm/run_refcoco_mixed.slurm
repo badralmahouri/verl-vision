@@ -9,8 +9,8 @@
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
 #SBATCH --gpus-per-node=1
-#SBATCH --output=%x.out
-#SBATCH --error=%x.err
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 
 set -euo pipefail
 set -o pipefail
@@ -19,7 +19,7 @@ source ~/miniconda3/etc/profile.d/conda.sh || source ~/anaconda3/etc/profile.d/c
 
 conda activate verl
 
-cd /users/$USER/verl-main
+cd /users/$USER/verl-vision
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
@@ -47,28 +47,28 @@ export RAY_TASK_IGNORE_ERRORS=0
 export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
-export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-main:${PYTHONPATH:-}"
+export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
 
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus || true
 
 ulimit -n 65535
-BASE="/users/$USER/verl-main"
+BASE="/users/$USER/verl-vision"
 
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
 TOOL_CONFIG_PATH="$BASE/examples/sglang_multiturn/config/multimodal_tool_config.yaml"
 CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/qwen_vl_tool_chat_template.jinja2"
 
-TRAIN_FILE="/users/abollengier/verl-main/data/refcoco_mixed/mixed_tools/train.parquet"
-VAL_FILE="/users/abollengier/verl-main/data/refcoco_mixed/mixed_tools/test.parquet"
+TRAIN_FILE="/users/$USER/verl-vision/data/refcoco_mixed/mixed_tools/train.parquet"
+VAL_FILE="/users/$USER/verl-vision/data/refcoco_mixed/mixed_tools/test.parquet"
 
 ERROR_COUNT=0
 
 echo "Checking required files..."
 if [ -f "$TRAIN_FILE" ]; then
     SIZE=$(du -h "$TRAIN_FILE" | cut -f1)
-    COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$TRAIN_FILE'))" 2>/dev/null || echo "?")
+    COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$TRAIN_FILE')))" 2>/dev/null || echo "?")
     echo "Train file exists: $TRAIN_FILE ($SIZE, $COUNT samples)"
 else
     echo "Train file NOT found: $TRAIN_FILE"
@@ -77,7 +77,7 @@ fi
 
 if [ -f "$VAL_FILE" ]; then
     SIZE=$(du -h "$VAL_FILE" | cut -f1)
-    COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$VAL_FILE'))" 2>/dev/null || echo "?")
+    COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$VAL_FILE')))" 2>/dev/null || echo "?")
     echo "Test file exists: $VAL_FILE ($SIZE, $COUNT samples)"
 else
     echo "Test file NOT found: $VAL_FILE"
@@ -117,9 +117,11 @@ export VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 echo "Custom chat template set: $VERL_CUSTOM_CHAT_TEMPLATE_PATH"
 
-python3 /users/$USER/verl-main/data_postprocess/verl_metrics.py \
+EXPERIMENT_NAME="refcoco_mixed_spatial_$(date +%Y%m%d_%H%M%S)"
+
+python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     --config-path="$CONFIG_PATH" \
-    --config-name='refcoco_bbox_grpo' \
+    --config-name='refcoco_mixed_grpo' \
     data.prompt_key='prompt' \
     data.filter_overlong_prompts=False \
     data.truncation='error' \
@@ -128,12 +130,19 @@ python3 /users/$USER/verl-main/data_postprocess/verl_metrics.py \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
     trainer.default_local_dir="$SCRATCH/checkpoint/refcoco_mixed" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
-
-EXPERIMENT_NAME="refcoco_mixed_spatial_$(date +%Y%m%d_%H%M%S)"
-export EXPERIMENT_NAME
-
     trainer.project_name='refcoco_mixed_training' \
     trainer.experiment_name="$EXPERIMENT_NAME" \
     "$@"
 
 echo "Training completed!"
+
+# --- Metrics extraction ---
+# Strips ANSI color codes from SLURM output, keeps only step metric lines.
+# Named with job ID so re-runs never overwrite. Delete stale logs manually.
+# To plot: python slurm/plot.py slurm/logs/metrics_refcoco_mixed_${SLURM_JOB_ID}.log
+OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+METRICS_LOG="${BASE}/slurm/logs/metrics_refcoco_mixed_${SLURM_JOB_ID}.log"
+mkdir -p "${BASE}/slurm/logs"
+sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
+echo "Metrics saved to: $METRICS_LOG"
+echo "To plot: python slurm/plot.py $METRICS_LOG"

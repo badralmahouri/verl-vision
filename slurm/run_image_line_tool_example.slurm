@@ -9,8 +9,8 @@
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
 #SBATCH --gpus-per-node=1
-#SBATCH --output=%x.out
-#SBATCH --error=%x.err
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 
 set -eo pipefail
 
@@ -19,7 +19,7 @@ source ~/miniconda3/etc/profile.d/conda.sh || source ~/anaconda3/etc/profile.d/c
 conda activate verl
 
 # --- Environment setup ---
-cd /users/$USER/verl-main
+cd /users/$USER/verl-vision
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
@@ -44,20 +44,20 @@ export RAY_TASK_IGNORE_ERRORS=0
 export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
-export PYTHONPATH="/users/$USER/verl-main:${PYTHONPATH:-}"
+export PYTHONPATH="/users/$USER/verl-vision:${PYTHONPATH:-}"
 
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
 
 ulimit -n 65535
-BASE="/users/$USER/verl-main"
+BASE="/users/$USER/verl-vision"
 
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
 TOOL_CONFIG_PATH="$BASE/examples/sglang_multiturn/config/tool_config/image_line_tool_config.yaml"
 
-TRAIN_FILE="/users/$USER/verl-main/data/line/train.parquet"
-VAL_FILE="/users/$USER/verl-main/data/line/test.parquet"
+TRAIN_FILE="/users/$USER/verl-vision/data/line/train.parquet"
+VAL_FILE="/users/$USER/verl-vision/data/line/test.parquet"
 
 if [ -f "$TRAIN_FILE" ]; then
     SIZE=$(du -h "$TRAIN_FILE" | cut -f1)
@@ -120,12 +120,13 @@ python3 -m verl.trainer.main_ppo \
 
 echo "Training completed."
 
-# Extract metrics to a separate file for easy plotting
-OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}.out"
-ERR_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}.err"
-
-echo "Reading metrics from $OUT_FILE"
-echo "Generating metrics.log and plotting..."
-
-sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > metrics.log
-python slurm/plot.py metrics.log
+# --- Metrics extraction ---
+# Strips ANSI color codes from SLURM output, keeps only step metric lines.
+# Named with job ID so re-runs never overwrite. Delete stale logs manually.
+# To plot: python slurm/plot.py slurm/logs/metrics_line_${SLURM_JOB_ID}.log
+OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+METRICS_LOG="${BASE}/slurm/logs/metrics_line_${SLURM_JOB_ID}.log"
+mkdir -p "${BASE}/slurm/logs"
+sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
+echo "Metrics saved to: $METRICS_LOG"
+echo "To plot: python slurm/plot.py $METRICS_LOG"

@@ -124,10 +124,10 @@ ENV/
 *.parquet
 
 
-# local logs
-logs
-log
-outputs
+# local logs (root-level only)
+/logs
+/log
+/outputs
 .history
 
 # Project-specific

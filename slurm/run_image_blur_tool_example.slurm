@@ -9,8 +9,8 @@
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
 #SBATCH --gpus-per-node=1
-#SBATCH --output=%x.out
-#SBATCH --error=%x.err
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 
 set -eo pipefail
 
@@ -117,3 +117,14 @@ python3 -m verl.trainer.main_ppo \
     "$@" 
 
 echo "Training completed."
+
+# --- Metrics extraction ---
+# Strips ANSI color codes from SLURM output, keeps only step metric lines.
+# Named with job ID so re-runs never overwrite. Delete stale logs manually.
+# To plot: python slurm/plot.py slurm/logs/metrics_blur_${SLURM_JOB_ID}.log
+OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+METRICS_LOG="${BASE}/slurm/logs/metrics_blur_${SLURM_JOB_ID}.log"
+mkdir -p "${BASE}/slurm/logs"
+sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
+echo "Metrics saved to: $METRICS_LOG"
+echo "To plot: python slurm/plot.py $METRICS_LOG"

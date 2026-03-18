@@ -1,0 +1,109 @@
+# emu3_bbox_grpo.yaml
+# Training config for bbox tool use with Emu3.5 model (from checkpoint)
+
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  # Data paths - will be overridden by command line
+  train_files: null
+  val_files: null
+
+  # Tokenization settings
+  max_prompt_length: 16384
+  max_response_length: 1024
+
+  # Batch settings
+  train_batch_size: 16
+  val_batch_size: 16
+
+  # Key names in your parquet
+  prompt_key: 'prompt'
+  response_key: 'answer'
+
+  # Processing options
+  return_raw_chat: True  # Important for multi-turn with images
+  filter_overlong_prompts: False
+  truncation: 'error'
+
+  # Dataset worker settings
+  num_workers: 0
+  prefetch_factor: null
+
+actor_rollout_ref:
+  hybrid_engine: True
+
+  # Actor config
+  actor:
+    _target_: verl.workers.config.actor.FSDPActorConfig
+    ppo_mini_batch_size: 16
+    ppo_micro_batch_size_per_gpu: 8
+    use_dynamic_bsz: False
+    optim:
+      lr: 1e-6
+    use_kl_loss: True
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config:
+      param_offload: True
+      optimizer_offload: True
+
+  # Model config — Emu3.5 checkpoint
+  model:
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+
+  # Rollout config
+  rollout:
+    name: sglang
+    mode: async
+    gpu_memory_utilization: 0.5
+    n: 4
+    log_prob_micro_batch_size_per_gpu: 2
+    tensor_model_parallel_size: 1
+    multi_turn:
+      enable: True
+      max_assistant_turns: 5
+      tool_config_path: null  # Will be set via command line
+      format: hermes
+    trace:
+      backend: tensorboard
+      token2text: True
+
+  # Reference model config
+  ref:
+    log_prob_micro_batch_size_per_gpu: 2
+    fsdp_config:
+      param_offload: True
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: True
+
+trainer:
+  critic_warmup: 0
+  logger: ["console", "tensorboard"]
+  project_name: 'emu3_bbox_training'
+  experiment_name: 'emu3_bbox_tool'
+  n_gpus_per_node: 1
+  nnodes: 1
+  save_freq: 10
+  test_freq: 10
+  total_training_steps: 100
+  total_epochs: 200
+  default_local_dir: null  # Will be set via command line
+  log_freq: 1
+  val_before_train: True
+
+# Reward model config - disabled, using rule-based rewards from bbox tool
+reward_model:
+  enable: False
+  reward_manager: naive
+  micro_batch_size_per_gpu: 64
+

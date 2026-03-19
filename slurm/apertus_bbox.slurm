@@ -94,7 +94,7 @@ fi
 
 
 # emu3 checks
-EMU3_CHECKPOINT="${EMU3_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss}"
+EMU3_CHECKPOINT="${EMU3_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF}"
 EMU3_TOKENIZER="${EMU3_TOKENIZER:-/users/$USER/Emu3.5/src/tokenizer_emu3_ibq}"
 
 echo "=== tokenizer checks ==="

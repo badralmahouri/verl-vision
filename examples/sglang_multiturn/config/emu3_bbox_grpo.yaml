@@ -33,8 +33,8 @@ data:
   truncation: 'error'
 
   # Dataset worker settings
-  num_workers: 4
-  prefetch_factor: 2
+  num_workers: 0
+  prefetch_factor: null
 
 actor_rollout_ref:
   hybrid_engine: True
@@ -64,7 +64,7 @@ actor_rollout_ref:
   rollout:
     name: sglang
     mode: async
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.35
     n: 4
     log_prob_micro_batch_size_per_gpu: 2
     tensor_model_parallel_size: 1
@@ -82,6 +82,7 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: 2
     fsdp_config:
       param_offload: True
+      model_dtype: bfloat16
 
 algorithm:
   adv_estimator: grpo

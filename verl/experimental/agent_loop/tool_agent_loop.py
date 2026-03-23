@@ -102,7 +102,17 @@ class ToolAgentLoop(AgentLoopBase):
         processor: AutoProcessor,
         **kwargs,
     ):
-        super().__init__(trainer_config, server_manager, tokenizer, processor, **kwargs)
+        # Load IBQ vision tokenizer for Apertus if VQ_MODEL_PATH is set
+        vq_model = None
+        vq_model_path = os.environ.get("VQ_MODEL_PATH")
+        if vq_model_path:
+            from verl.utils.apertus_vision import load_vision_tokenizer
+
+            logger.info(f"Loading IBQ vision tokenizer from {vq_model_path}")
+            vq_model = load_vision_tokenizer(vq_model_path, device="cpu")
+            logger.info("IBQ vision tokenizer loaded successfully")
+
+        super().__init__(trainer_config, server_manager, tokenizer, processor, vq_model=vq_model, **kwargs)
         config = trainer_config.config
 
         # Initialize tools from config file
@@ -135,9 +145,19 @@ class ToolAgentLoop(AgentLoopBase):
         messages = list(kwargs["raw_prompt"])
 
         # extract images and videos from messages
-        multi_modal_data = await self.process_vision_info(messages)
-        images = multi_modal_data.get("images")
-        videos = multi_modal_data.get("videos")
+        if self.vq_model is not None:
+            # Apertus path: load images from dataset's "images" field (file paths)
+            image_paths = kwargs.get("images", [])
+            if image_paths is not None and len(image_paths) > 0:
+                images = [Image.open(p).convert("RGB") for p in image_paths]
+            else:
+                images = None
+            videos = None
+        else:
+            # Qwen VL path: extract from structured message content
+            multi_modal_data = await self.process_vision_info(messages)
+            images = multi_modal_data.get("images")
+            videos = multi_modal_data.get("videos")
 
         metrics = {}
         request_id = uuid4().hex
@@ -286,43 +306,54 @@ class ToolAgentLoop(AgentLoopBase):
             responses = await asyncio.gather(*tasks)
 
         # Process tool responses and update multi_modal_data
-        # Removed: agent_data.new_images_this_turn = []
         for tool_response, tool_reward, _ in responses:
             # Create message from tool response
-            if tool_response.image or tool_response.video:
-                # Multi-modal content with structured format
-                if not getattr(self.processor, "image_processor", None):
-                    raise ValueError(
-                        "Multimedia data can only be processed by `processor`, but the processor is None. "
-                        "This error is often caused if you are using a LLM model but your tool returns multimodal "
-                        "data. Plase use a vlm as the base model."
-                    )
-                content = []
-                if tool_response.image:
-                    content.append({"type": "image"})
-                if tool_response.video:
-                    content.append({"type": "video"})
+            if tool_response.image and self.vq_model is not None:
+                # Apertus path: encode tool-returned images as discrete tokens in text
+                from verl.utils.apertus_vision import encode_image
+
+                text_parts = []
+                tool_images = tool_response.image if isinstance(tool_response.image, list) else [tool_response.image]
+                for img in tool_images:
+                    if img is not None:
+                        image_str = encode_image(img, self.vq_model)
+                        text_parts.append(image_str)
                 if tool_response.text:
-                    content.append({"type": "text", "text": tool_response.text})
-                message = {"role": "tool", "content": content}
+                    text_parts.append(tool_response.text)
+                message = {"role": "tool", "content": " ".join(text_parts)}
+            elif tool_response.image or tool_response.video:
+                # Qwen VL path: multi-modal content with structured format
+                if not getattr(self.processor, "image_processor", None):
+                    logger.warning(
+                        "Tool returned multimodal data but no image_processor available. "
+                        "Treating as text-only. Model won't see tool-generated images."
+                    )
+                    message = {"role": "tool", "content": tool_response.text or ""}
+                else:
+                    content = []
+                    if tool_response.image:
+                        content.append({"type": "image"})
+                    if tool_response.video:
+                        content.append({"type": "video"})
+                    if tool_response.text:
+                        content.append({"type": "text", "text": tool_response.text})
+                    message = {"role": "tool", "content": content}
             else:
                 # Text-only content
                 message = {"role": "tool", "content": tool_response.text or ""}
 
             add_messages.append(message)
 
-            # Handle image data
-            if tool_response.image:
+            # Handle image data (Qwen VL path only — Apertus images are in the text)
+            if tool_response.image and getattr(self.processor, "image_processor", None):
                 # Add new image data
                 if isinstance(tool_response.image, list):
-                    # Ensure all elements in the list are valid image objects
                     for img in tool_response.image:
-                        if img is not None:  # Add a check to ensure the image is not None
-                            new_images_this_turn.append(img)  # Using local variable
+                        if img is not None:
+                            new_images_this_turn.append(img)
                 else:
-                    # Ensure the image is not None
                     if tool_response.image is not None:
-                        new_images_this_turn.append(tool_response.image)  # Using local variable
+                        new_images_this_turn.append(tool_response.image)
 
             # Handle video data
             if tool_response.video:

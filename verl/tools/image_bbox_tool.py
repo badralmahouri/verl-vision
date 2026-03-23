@@ -28,12 +28,20 @@ from io import BytesIO
 import ray
 import ray.actor
 from PIL import Image, ImageDraw
-from qwen_vl_utils import fetch_image
+try:
+    from qwen_vl_utils import fetch_image
+except ImportError:
+    # Fallback for non-Qwen environments (e.g., Apertus)
+    def fetch_image(image_info):
+        img = image_info.get("image") if isinstance(image_info, dict) else image_info
+        if isinstance(img, Image.Image):
+            return img.convert("RGB")
+        raise ValueError(f"Cannot fetch image from: {type(img)}")
 
 from verl.utils.rollout_trace import rollout_trace_op
 
 from .base_tool import BaseTool
-from .schemas import OpenAIFunctionToolSchema
+from .schemas import OpenAIFunctionToolSchema, ToolResponse
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -324,7 +332,7 @@ class ImageBBoxTool(BaseTool):
     def get_openai_tool_schema(self) -> OpenAIFunctionToolSchema:
         return self.tool_schema
 
-    async def create(self, image: str | Image.Image, instance_id: Optional[str] = None, **kwargs) -> str:
+    async def create(self, instance_id: Optional[str] = None, **kwargs) -> tuple[str, ToolResponse]:
         """
         Creates a new instance for image bbox-drawing tool.
 
@@ -335,7 +343,8 @@ class ImageBBoxTool(BaseTool):
         Args:
             instance_id: An optional unique identifier for the instance. If not
                 provided, a new UUID will be generated.
-            image: image can be one of the following:
+            **kwargs: Should contain 'image' key with image data, or 'create_kwargs'
+                containing {'image': image_data}. Image can be one of the following:
                 - A PIL.Image.Image object.
                 - A string containing an HTTP or HTTPS URL.
                 - A string containing a local file path.
@@ -343,12 +352,22 @@ class ImageBBoxTool(BaseTool):
                 - A string containing a base64-encoded image in the format of "data:image/jpeg;base64,..."
 
         Returns:
-            The unique identifier for the created instance.
+            Tuple of (instance_id, ToolResponse)
         """
         if instance_id is None:
             instance_id = str(uuid4())
 
-        if 'bytes' in image:
+        # Handle create_kwargs parameter if passed
+        create_kwargs = kwargs.get("create_kwargs", {})
+        if create_kwargs:
+            kwargs.update(create_kwargs)
+
+        # Get image from kwargs
+        image = kwargs.get("image")
+        if image is None:
+            raise ValueError("Missing required 'image' parameter in kwargs")
+
+        if isinstance(image, dict) and 'bytes' in image:
             # convert raw bytes to PIL.Image
             image = Image.open(BytesIO(image['bytes']))
         elif isinstance(image, str) and os.path.isfile(image):
@@ -360,16 +379,16 @@ class ImageBBoxTool(BaseTool):
             "response": "",
             "reward": 0.0,
         }
-        return instance_id
+        return instance_id, ToolResponse()
 
     @rollout_trace_op
-    async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[dict, float, dict]:
+    async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[ToolResponse, float, dict]:
         bbox_2d = parameters.get("bbox_2d")
         label = parameters.get("label", "")
 
         if not bbox_2d or len(bbox_2d) != 4:
             return (
-                {"text": "Error: bbox_2d parameter is missing or not a list of 4 numbers."},
+                ToolResponse(text="Error: bbox_2d parameter is missing or not a list of 4 numbers."),
                 -0.05,
                 {"success": False},
             )
@@ -387,25 +406,22 @@ class ImageBBoxTool(BaseTool):
                     f"the minimum size of {self.MIN_DIMENSION}x{self.MIN_DIMENSION}."
                 )
                 logger.warning(f"Tool execution failed: {error_msg}")
-                return {"text": error_msg}, -0.05, {"success": False}
+                return ToolResponse(text=error_msg), -0.05, {"success": False}
 
             image_with_box = image.copy()
             draw = ImageDraw.Draw(image_with_box)
             draw.rectangle(resized_bbox, outline="red", width=3)
-            self._save_image_debug_info(image, image_with_box, bbox, resized_bbox, label, output_path="/users/jsaydali/scratch/run_outputs/debug_output")
+            # self._save_image_debug_info(image, image_with_box, bbox_2d, resized_bbox, label, output_path="/users/jsaydali/scratch/run_outputs/debug_output")
         except Exception as e:
             logger.error(f"Error processing image bbox-drawing: {e}")
-            return {"text": f"Error processing image bbox-drawing: {e}"}, -0.05, {"success": False}
+            return ToolResponse(text=f"Error processing image bbox-drawing: {e}"), -0.05, {"success": False}
 
         response_text = f"Drew a bounding box on the image at the region {bbox_2d}."
         if label:
             response_text = f"Drew a bounding box on the image at the region {bbox_2d} with label {label}."
 
         return (
-            {
-                "image": [image_with_box],
-                "text": response_text,
-            },
+            ToolResponse(image=[image_with_box], text=response_text),
             0.0,
             {"success": True},
         )

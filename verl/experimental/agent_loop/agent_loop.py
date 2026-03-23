@@ -200,6 +200,7 @@ class AgentLoopBase(ABC):
         processor: AutoProcessor,
         dataset_cls: type[RLHFDataset],
         dataset_config: DictConfig,
+        vq_model=None,
         **kwargs,
     ):
         """Initialize agent loop, each sample will have its own loop instance.
@@ -211,11 +212,13 @@ class AgentLoopBase(ABC):
             processor (AutoProcessor): Processor for process messages.
             dataset_cls (type[Dataset]): Dataset class for creating dataset, Defaults to RLHFDataset.
             dataset_config (DictConfig): Dataset config.
+            vq_model: Optional IBQ vision tokenizer for Apertus discrete image encoding.
         """
         self.config = trainer_config.config
         self.server_manager = server_manager
         self.tokenizer = tokenizer
         self.processor = processor
+        self.vq_model = vq_model
         self.dataset_cls = dataset_cls
         self.dataset_config = dataset_config
         self.apply_chat_template_kwargs = dataset_config.get("apply_chat_template_kwargs", {})
@@ -291,6 +294,9 @@ class AgentLoopBase(ABC):
                 do_sample_frames=False,
             )
             prompt_ids = model_inputs.pop("input_ids").squeeze(0).tolist()
+        elif self.vq_model is not None:
+            # Apertus path: discrete image tokens via IBQ
+            prompt_ids = await self._apply_chat_template_apertus(messages, tools, images)
         else:
             prompt_ids = await self.loop.run_in_executor(
                 None,
@@ -305,6 +311,52 @@ class AgentLoopBase(ABC):
 
         if remove_system_prompt:
             prompt_ids = prompt_ids[len(self.system_prompt) :]
+
+        return prompt_ids
+
+    async def _apply_chat_template_apertus(
+        self,
+        messages: list[dict],
+        tools: list[dict] = None,
+        images: list[Image.Image] = None,
+    ) -> list[int]:
+        """Apertus-specific chat template: encode images as discrete tokens via IBQ.
+
+        Flow:
+        1. Apply chat template (text-only, tokenize=False) → raw text
+        2. Replace <image> / <|image|> placeholders with IBQ-encoded token strings
+        3. Tokenize the full text (images are now part of the token sequence)
+        """
+        from verl.utils.apertus_vision import encode_image
+
+        # Step 1: Get raw text with image placeholders
+        raw_prompt = await self.loop.run_in_executor(
+            None,
+            lambda: self.tokenizer.apply_chat_template(
+                messages,
+                tools=tools,
+                add_generation_prompt=True,
+                tokenize=False,
+                **self.apply_chat_template_kwargs,
+            ),
+        )
+
+        # Step 2: Replace image placeholders with IBQ token strings
+        if images:
+            for img in images:
+                image_str = encode_image(img, self.vq_model)
+                # The Apertus template outputs <|image|> for structured image parts.
+                # The dataset may also have <image> as inline text in string content.
+                if "<|image|>" in raw_prompt:
+                    raw_prompt = raw_prompt.replace("<|image|>", image_str, 1)
+                elif "<image>" in raw_prompt:
+                    raw_prompt = raw_prompt.replace("<image>", image_str, 1)
+
+        # Step 3: Tokenize the complete text (images are now discrete tokens in the text)
+        prompt_ids = await self.loop.run_in_executor(
+            None,
+            lambda: self.tokenizer.encode(raw_prompt, add_special_tokens=False),
+        )
 
         return prompt_ids
 

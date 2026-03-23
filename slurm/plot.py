@@ -247,7 +247,7 @@ def plot_training_metrics(metrics, save_dir='plots'):
     
     plt.close('all')
 
-def print_diagnostics(metrics):
+def print_diagnostics(metrics, log_file=None):
     """Print diagnostic information about training."""
     
     print("\n" + "="*60)
@@ -331,22 +331,18 @@ def print_diagnostics(metrics):
 # Main execution
 if __name__ == "__main__":
     import sys
-    
+
     log_file = sys.argv[1] if len(sys.argv) > 1 else "metrics.log"
-    
+    save_dir = sys.argv[2] if len(sys.argv) > 2 else "plots"
+
     print(f"Parsing log: {log_file}")
     metrics = parse_training_log(log_file)
 
     print(f"Found {len(metrics['step'])} steps")
 
-    print("Generating plots")
-    plot_training_metrics(metrics)
+    print(f"Generating plots to {save_dir}/")
+    plot_training_metrics(metrics, save_dir=save_dir)
 
-    print_diagnostics(metrics)
+    print_diagnostics(metrics, log_file=log_file)
 
-    print("All plots saved to 'plots/'")
-
-
-def log_file():
-    """Global variable for diagnostics."""
-    return sys.argv[1] if len(sys.argv) > 1 else "metrics.log"
+    print(f"All plots saved to '{save_dir}/'")

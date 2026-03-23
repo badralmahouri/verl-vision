@@ -47,7 +47,15 @@ export RAY_TASK_IGNORE_ERRORS=0
 export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
-export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
+# Emu3.5 src needed for IBQ vision tokenizer (build_vision_tokenizer)
+EMU3_SRC="/users/$USER/Emu3.5/src"
+export PYTHONPATH="${EMU3_SRC}:/users/$USER/verl-vision/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
+export RAY_worker_env_PYTHONPATH="$PYTHONPATH"
+
+# IBQ vision tokenizer for discrete image encoding
+VQ_MODEL_PATH="/capstor/store/cscs/swissai/infra01/MLLM/tokenizer/Emu3.5-VisionTokenizer"
+export VQ_MODEL_PATH
+export RAY_worker_env_VQ_MODEL_PATH="$VQ_MODEL_PATH"
 
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
@@ -58,7 +66,6 @@ BASE="/users/$USER/verl-vision"
 # configs
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
 TOOL_CONFIG_PATH="$BASE/examples/sglang_multiturn/config/bbox_only_tool_config.yaml"
-CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/qwen_vl_tool_chat_template.jinja2"
 
 # data
 TRAIN_FILE="/users/$USER/verl-vision/data/bbox/train.parquet"
@@ -91,15 +98,15 @@ else
 fi
 
 # apertus checks
-EMU3_CHECKPOINT="${EMU3_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF}"
-EMU3_TOKENIZER="${EMU3_TOKENIZER:-$EMU3_CHECKPOINT}"
+APERTUS_CHECKPOINT="${APERTUS_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF}"
+APERTUS_TOKENIZER="${APERTUS_TOKENIZER:-$APERTUS_CHECKPOINT}"
 
 echo "=== tokenizer checks ==="
-if [ -d "$EMU3_CHECKPOINT" ]; then
-    echo "✓ Apertus checkpoint dir: $EMU3_CHECKPOINT"
+if [ -d "$APERTUS_CHECKPOINT" ]; then
+    echo "✓ Apertus checkpoint dir: $APERTUS_CHECKPOINT"
     # Verify key files exist in checkpoint
     for f in config.json; do
-        if [ -f "$EMU3_CHECKPOINT/$f" ]; then
+        if [ -f "$APERTUS_CHECKPOINT/$f" ]; then
             echo "  ✓ $f found"
         else
             echo "  ✗ $f NOT found in checkpoint — model loading may fail"
@@ -107,16 +114,16 @@ if [ -d "$EMU3_CHECKPOINT" ]; then
         fi
     done
 else
-    echo "✗ Apertus checkpoint NOT found: $EMU3_CHECKPOINT"
-    echo "  Set EMU3_CHECKPOINT env var or edit this script."
+    echo "✗ Apertus checkpoint NOT found: $APERTUS_CHECKPOINT"
+    echo "  Set APERTUS_CHECKPOINT env var or edit this script."
     ((ERROR_COUNT++))
 fi
 
 # Check tokenizer (Apertus uses standard HF tokenizer bundled in checkpoint)
-if [ -d "$EMU3_TOKENIZER" ]; then
-    echo "✓ Tokenizer dir: $EMU3_TOKENIZER"
+if [ -d "$APERTUS_TOKENIZER" ]; then
+    echo "✓ Tokenizer dir: $APERTUS_TOKENIZER"
     for f in tokenizer_config.json; do
-        if [ -f "$EMU3_TOKENIZER/$f" ]; then
+        if [ -f "$APERTUS_TOKENIZER/$f" ]; then
             echo "  ✓ $f found"
         else
             echo "  ✗ $f NOT found — tokenizer loading may fail"
@@ -124,15 +131,25 @@ if [ -d "$EMU3_TOKENIZER" ]; then
         fi
     done
 else
-    echo "✗ Tokenizer NOT found: $EMU3_TOKENIZER"
+    echo "✗ Tokenizer NOT found: $APERTUS_TOKENIZER"
     ((ERROR_COUNT++))
 fi
 
-# Custom chat template for tool calling support for Apertus
-if [ -f "$CHAT_TEMPLATE_PATH" ]; then
-    echo "Chat template exists: $CHAT_TEMPLATE_PATH"
+# IBQ vision tokenizer check
+if [ -d "$VQ_MODEL_PATH" ]; then
+    echo "✓ VQ model dir: $VQ_MODEL_PATH"
 else
-    echo "Chat template NOT found: $CHAT_TEMPLATE_PATH"
+    echo "✗ VQ model NOT found: $VQ_MODEL_PATH"
+    echo "  IBQ vision tokenizer needed for discrete image encoding."
+    ((ERROR_COUNT++))
+fi
+
+# Emu3.5 source check (for vision_tokenizer module)
+if [ -d "$EMU3_SRC/vision_tokenizer" ]; then
+    echo "✓ Emu3.5 vision_tokenizer module: $EMU3_SRC/vision_tokenizer"
+else
+    echo "✗ Emu3.5 vision_tokenizer NOT found: $EMU3_SRC/vision_tokenizer"
+    echo "  Clone https://github.com/baaivision/Emu3.5 to /users/$USER/Emu3.5"
     ((ERROR_COUNT++))
 fi
 
@@ -144,18 +161,15 @@ fi
 
 echo ""
 echo "=== Training Configuration ==="
-echo "  Apertus checkpoint : $EMU3_CHECKPOINT"
-echo "  Apertus tokenizer  : $EMU3_TOKENIZER"
+echo "  Apertus checkpoint : $APERTUS_CHECKPOINT"
+echo "  Apertus tokenizer  : $APERTUS_TOKENIZER"
+echo "  VQ model (IBQ)     : $VQ_MODEL_PATH"
 echo "  Train data         : $TRAIN_FILE"
 echo "  Val data           : $VAL_FILE"
 echo "  Tool config        : $TOOL_CONFIG_PATH"
-echo "  Chat template      : $CHAT_TEMPLATE_PATH"
+echo "  Chat template      : (loaded from HF checkpoint tokenizer)"
 echo "==================================================================="
 echo ""
-
-export VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
-export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
-echo "Custom chat template set: $VERL_CUSTOM_CHAT_TEMPLATE_PATH"
 
 # --- Run training ---
 python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
@@ -166,11 +180,11 @@ python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     data.truncation='error' \
     data.train_files="$TRAIN_FILE" \
     data.val_files="$VAL_FILE" \
-    actor_rollout_ref.model.path="$EMU3_CHECKPOINT" \
-    actor_rollout_ref.model.tokenizer_path="$EMU3_CHECKPOINT" \
+    actor_rollout_ref.model.path="$APERTUS_CHECKPOINT" \
+    actor_rollout_ref.model.tokenizer_path="$APERTUS_CHECKPOINT" \
     actor_rollout_ref.model.trust_remote_code=True \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
-    trainer.default_local_dir="$SCRATCH/checkpoint/emu3_bbox" \
+    trainer.default_local_dir="$SCRATCH/checkpoint/apertus_bbox" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
     "$@"
 echo "Training completed!"
@@ -184,4 +198,10 @@ METRICS_LOG="${BASE}/slurm/logs/metrics_apertus_bbox_${SLURM_JOB_ID}.log"
 mkdir -p "${BASE}/slurm/logs"
 sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
 echo "Metrics saved to: $METRICS_LOG"
-echo "To plot: python slurm/plot.py $METRICS_LOG"
+
+# --- Auto-generate plots ---
+PLOT_DIR="${BASE}/slurm/plots/apertus_bbox_${SLURM_JOB_ID}"
+echo "Generating plots to: $PLOT_DIR"
+python3 "${BASE}/slurm/plot.py" "$METRICS_LOG" "$PLOT_DIR" || echo "WARNING: Plot generation failed"
+echo "Plots saved to: $PLOT_DIR"
+echo "To re-plot: python slurm/plot.py $METRICS_LOG $PLOT_DIR"

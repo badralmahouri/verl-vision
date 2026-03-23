@@ -19,7 +19,7 @@ source ~/miniconda3/etc/profile.d/conda.sh || source ~/anaconda3/etc/profile.d/c
 conda activate verl
 
 # --- Environment setup ---
-cd /users/$USER/verl-main
+cd /users/$USER/verl-vision
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export NCCL_DEBUG=${NCCL_DEBUG:-INFO}
@@ -47,23 +47,22 @@ export RAY_TASK_IGNORE_ERRORS=0
 export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
-EMU3_SRC="/users/$USER/Emu3.5/src"
-export PYTHONPATH="${EMU3_SRC}:/users/$USER/data_postprocess:/users/$USER/verl-main:${PYTHONPATH:-}"
-export RAY_worker_env_PYTHONPATH="$PYTHONPATH"
+export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
 
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
 ulimit -n 65535
-BASE="/users/$USER/verl-main"
+BASE="/users/$USER/verl-vision"
 
 # configs
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
 TOOL_CONFIG_PATH="$BASE/examples/sglang_multiturn/config/bbox_only_tool_config.yaml"
+CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/qwen_vl_tool_chat_template.jinja2"
 
 # data
-TRAIN_FILE="/users/$USER/verl-main/data/bbox/train.parquet"
-VAL_FILE="/users/$USER/verl-main/data/bbox/test.parquet"
+TRAIN_FILE="/users/$USER/verl-vision/data/bbox/train.parquet"
+VAL_FILE="/users/$USER/verl-vision/data/bbox/test.parquet"
 
 ERROR_COUNT=0
 # data presence check
@@ -83,23 +82,21 @@ else
     ((ERROR_COUNT++))
 fi
 
-# took config checks
-TOOL_CONFIG="/users/$USER/verl-main/examples/sglang_multiturn/config/bbox_only_tool_config.yaml"
-if [ -f "$TOOL_CONFIG" ]; then
-    echo "Tool config exists: $TOOL_CONFIG"
+# tool config checks
+if [ -f "$TOOL_CONFIG_PATH" ]; then
+    echo "Tool config exists: $TOOL_CONFIG_PATH"
 else
-    echo "Tool config NOT found: $TOOL_CONFIG"
+    echo "Tool config NOT found: $TOOL_CONFIG_PATH"
     ((ERROR_COUNT++))
 fi
 
-
-# emu3 checks
+# apertus checks
 EMU3_CHECKPOINT="${EMU3_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF}"
-EMU3_TOKENIZER="${EMU3_TOKENIZER:-/users/$USER/Emu3.5/src/tokenizer_emu3_ibq}"
+EMU3_TOKENIZER="${EMU3_TOKENIZER:-$EMU3_CHECKPOINT}"
 
 echo "=== tokenizer checks ==="
 if [ -d "$EMU3_CHECKPOINT" ]; then
-    echo "✓ Emu3.5 checkpoint dir: $EMU3_CHECKPOINT"
+    echo "✓ Apertus checkpoint dir: $EMU3_CHECKPOINT"
     # Verify key files exist in checkpoint
     for f in config.json; do
         if [ -f "$EMU3_CHECKPOINT/$f" ]; then
@@ -110,15 +107,15 @@ if [ -d "$EMU3_CHECKPOINT" ]; then
         fi
     done
 else
-    echo "✗ Emu3.5 checkpoint NOT found: $EMU3_CHECKPOINT"
+    echo "✗ Apertus checkpoint NOT found: $EMU3_CHECKPOINT"
     echo "  Set EMU3_CHECKPOINT env var or edit this script."
     ((ERROR_COUNT++))
 fi
 
-# Check tokenizer
+# Check tokenizer (Apertus uses standard HF tokenizer bundled in checkpoint)
 if [ -d "$EMU3_TOKENIZER" ]; then
-    echo "✓ Emu3.5 tokenizer dir: $EMU3_TOKENIZER"
-    for f in tokenizer_config.json emu3.tiktoken tokenization_emu3.py; do
+    echo "✓ Tokenizer dir: $EMU3_TOKENIZER"
+    for f in tokenizer_config.json; do
         if [ -f "$EMU3_TOKENIZER/$f" ]; then
             echo "  ✓ $f found"
         else
@@ -127,15 +124,17 @@ if [ -d "$EMU3_TOKENIZER" ]; then
         fi
     done
 else
-    echo "✗ Emu3.5 tokenizer NOT found: $EMU3_TOKENIZER"
+    echo "✗ Tokenizer NOT found: $EMU3_TOKENIZER"
     ((ERROR_COUNT++))
 fi
 
-# Check emu3p5 module is importable
-python3 -c "import emu3p5; print('✓ emu3p5 module importable')" 2>/dev/null || {
-    echo "✗ Cannot import emu3p5 — check PYTHONPATH includes $EMU3_SRC"
+# Custom chat template for tool calling support for Apertus
+if [ -f "$CHAT_TEMPLATE_PATH" ]; then
+    echo "Chat template exists: $CHAT_TEMPLATE_PATH"
+else
+    echo "Chat template NOT found: $CHAT_TEMPLATE_PATH"
     ((ERROR_COUNT++))
-}
+fi
 
 if [ $ERROR_COUNT -gt 0 ]; then
     echo ""
@@ -143,33 +142,23 @@ if [ $ERROR_COUNT -gt 0 ]; then
     exit 1
 fi
 
-# Custom chat template for tool calling support same for emu3.5
-CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/qwen_vl_tool_chat_template.jinja2"
-
 echo ""
 echo "=== Training Configuration ==="
-echo "  Model checkpoint : $EMU3_CHECKPOINT"
-echo "  Tokenizer        : $EMU3_TOKENIZER"
-echo "  Train data       : $TRAIN_FILE"
-echo "  Val data         : $VAL_FILE"
-echo "  Tool config      : $TOOL_CONFIG_PATH"
-echo "  Chat template    : $CHAT_TEMPLATE_PATH"
+echo "  Apertus checkpoint : $EMU3_CHECKPOINT"
+echo "  Apertus tokenizer  : $EMU3_TOKENIZER"
+echo "  Train data         : $TRAIN_FILE"
+echo "  Val data           : $VAL_FILE"
+echo "  Tool config        : $TOOL_CONFIG_PATH"
+echo "  Chat template      : $CHAT_TEMPLATE_PATH"
 echo "==================================================================="
 echo ""
-
-if [ -f "$CHAT_TEMPLATE_PATH" ]; then
-    echo "Chat template exists: $CHAT_TEMPLATE_PATH"
-else
-    echo "Chat template NOT found: $CHAT_TEMPLATE_PATH"
-    exit 1
-fi
 
 export VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 echo "Custom chat template set: $VERL_CUSTOM_CHAT_TEMPLATE_PATH"
 
 # --- Run training ---
-python3 /users/$USER/verl-main/data_postprocess/verl_metrics.py \
+python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     --config-path="$CONFIG_PATH" \
     --config-name='emu3_bbox_grpo' \
     data.prompt_key='prompt' \
@@ -178,21 +167,21 @@ python3 /users/$USER/verl-main/data_postprocess/verl_metrics.py \
     data.train_files="$TRAIN_FILE" \
     data.val_files="$VAL_FILE" \
     actor_rollout_ref.model.path="$EMU3_CHECKPOINT" \
-    actor_rollout_ref.model.tokenizer_path="$EMU3_TOKENIZER" \
+    actor_rollout_ref.model.tokenizer_path="$EMU3_CHECKPOINT" \
     actor_rollout_ref.model.trust_remote_code=True \
-    actor_rollout_ref.model.external_lib='emu3p5' \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
     trainer.default_local_dir="$SCRATCH/checkpoint/emu3_bbox" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
     "$@"
-echo "Training completed. "
+echo "Training completed!"
 
-# Extract metrics to a separate file for easy plotting
-OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}.out"
-ERR_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}.err"
-
-
-#echo "Reading metrics from $OUT_FILE"
-#echo "Generating metrics.log and plotting..."
-
-#sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > metrics.log
+# --- Metrics extraction ---
+# Strips ANSI color codes from SLURM output, keeps only step metric lines.
+# Named with job ID so re-runs never overwrite. Delete stale logs manually.
+# To plot: python slurm/plot.py slurm/logs/metrics_apertus_bbox_${SLURM_JOB_ID}.log
+OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+METRICS_LOG="${BASE}/slurm/logs/metrics_apertus_bbox_${SLURM_JOB_ID}.log"
+mkdir -p "${BASE}/slurm/logs"
+sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
+echo "Metrics saved to: $METRICS_LOG"
+echo "To plot: python slurm/plot.py $METRICS_LOG"

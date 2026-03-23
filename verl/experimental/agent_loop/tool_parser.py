@@ -159,3 +159,57 @@ class GptOssToolParser(ToolParser):
         content = regex.sub(self.tool_call_pattern, "", text)
 
         return content, function_calls
+
+
+@ToolParser.register("apertus")
+class ApertusToolParser(ToolParser):
+    """
+    Tool parser for the Apertus model.
+
+    Apertus generates tool calls in this format:
+        <|tools_prefix|>[{"func_name": {args}}]<|tools_suffix|>
+
+    Unlike Hermes format ({"name": ..., "arguments": ...}), Apertus uses a
+    dict where the key is the function name and the value is the arguments
+    object directly.
+    """
+
+    def __init__(self, tokenizer) -> None:
+        super().__init__(tokenizer)
+        self.tool_call_start_token: str = "<|tools_prefix|>"
+        self.tool_call_end_token: str = "<|tools_suffix|>"
+        # Match <|tools_prefix|>...<|tools_suffix|> — capture everything including outer brackets
+        self.tool_call_regex = regex.compile(
+            r"<\|tools_prefix\|>(.*?)<\|tools_suffix\|>", regex.DOTALL
+        )
+
+    @rollout_trace_op
+    async def extract_tool_calls(self, responses_ids: list[int]) -> tuple[str, list[FunctionCall]]:
+        loop = get_event_loop()
+        # Must keep special tokens so <|tools_prefix|> and <|tools_suffix|> appear in decoded text.
+        text = await loop.run_in_executor(
+            None, lambda: self.tokenizer.decode(responses_ids, skip_special_tokens=False)
+        )
+
+        if self.tokenizer.pad_token:
+            text = text.replace(self.tokenizer.pad_token, "")
+
+        if self.tool_call_start_token not in text or self.tool_call_end_token not in text:
+            return text, []
+
+        matches = self.tool_call_regex.findall(text)
+        function_calls = []
+        for match in matches:
+            try:
+                # match is the full JSON array: [{"func": args}, {"func2": args2}, ...]
+                calls = json.loads(match)
+                for call in calls:
+                    for name, arguments in call.items():
+                        function_calls.append(
+                            FunctionCall(name=name, arguments=json.dumps(arguments, ensure_ascii=False))
+                        )
+            except Exception as e:
+                logger.error(f"Failed to decode Apertus tool call: {e}")
+
+        content = self.tool_call_regex.sub("", text)
+        return content, function_calls

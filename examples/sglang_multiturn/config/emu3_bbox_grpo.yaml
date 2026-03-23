@@ -1,5 +1,5 @@
-# emu3_bbox_grpo.yaml
-# Training config for bbox tool use with Emu3.5 model (from checkpoint)
+# apertus_bbox_grpo.yaml
+# Training config for bbox tool use with Apertus model (from checkpoint)
 
 hydra:
   searchpath:
@@ -25,6 +25,7 @@ data:
   # Key names in your parquet
   prompt_key: 'prompt'
   response_key: 'answer'
+  image_key: images
 
   # Processing options
   return_raw_chat: True  # Important for multi-turn with images
@@ -32,8 +33,8 @@ data:
   truncation: 'error'
 
   # Dataset worker settings
-  num_workers: 0
-  prefetch_factor: null
+  num_workers: 4
+  prefetch_factor: 2
 
 actor_rollout_ref:
   hybrid_engine: True
@@ -54,7 +55,7 @@ actor_rollout_ref:
       param_offload: True
       optimizer_offload: True
 
-  # Model config — Emu3.5 checkpoint
+  # Model config — Apertus checkpoint
   model:
     use_remove_padding: True
     enable_gradient_checkpointing: True
@@ -71,7 +72,7 @@ actor_rollout_ref:
       enable: True
       max_assistant_turns: 5
       tool_config_path: null  # Will be set via command line
-      format: hermes
+      format: apertus
     trace:
       backend: tensorboard
       token2text: True
@@ -89,8 +90,8 @@ algorithm:
 trainer:
   critic_warmup: 0
   logger: ["console", "tensorboard"]
-  project_name: 'emu3_bbox_training'
-  experiment_name: 'emu3_bbox_tool'
+  project_name: 'apertus_bbox_training'
+  experiment_name: 'apertus_bbox_tool'
   n_gpus_per_node: 1
   nnodes: 1
   save_freq: 10

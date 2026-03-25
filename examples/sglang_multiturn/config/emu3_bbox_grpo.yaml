@@ -54,6 +54,7 @@ actor_rollout_ref:
     fsdp_config:
       param_offload: True
       optimizer_offload: True
+      model_dtype: bfloat16
 
   # Model config — Apertus checkpoint
   model:
@@ -68,6 +69,9 @@ actor_rollout_ref:
     n: 4
     log_prob_micro_batch_size_per_gpu: 2
     tensor_model_parallel_size: 1
+    engine_kwargs:
+      sglang:
+        log_level: info
     multi_turn:
       enable: True
       max_assistant_turns: 5

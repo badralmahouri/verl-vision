@@ -1,7 +1,7 @@
 """
 Reward function for bbox tool use training.
 Rewards: IoU of predicted bbox vs expected + answer correctness in \\boxed{}.
-ONLY rewards ACTUAL tool use via <tool_call>...</tool_call> format.
+Supports both Hermes (<tool_call>) and Apertus (<|tools_prefix|>) tool call formats.
 Normalized to [0, 1] range.
 """
 
@@ -35,24 +35,43 @@ def compute_iou(box1, box2):
 
 def extract_tool_calls_from_text(text):
     """
-    Extract ONLY properly formatted tool calls using <tool_call>...</tool_call> tags.
-    Returns list of parsed tool call dicts, or empty list if none found.
+    Extract properly formatted tool calls from model output.
+    Supports two formats:
+      - Hermes: <tool_call>{"name": ..., "arguments": {...}}</tool_call>
+      - Apertus: <|tools_prefix|>[{"func_name": {args}}]<|tools_suffix|>
+    Returns list of parsed tool call dicts with "name" and "arguments" keys.
     """
     if not text:
         return []
-    
+
     tool_calls = []
-    pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
-    matches = re.findall(pattern, text, re.DOTALL)
-    
-    for match in matches:
+
+    # Format 1: Hermes — <tool_call>{"name": ..., "arguments": {...}}</tool_call>
+    hermes_pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
+    for match in re.findall(hermes_pattern, text, re.DOTALL):
         try:
             parsed = json.loads(match.strip())
             if isinstance(parsed, dict) and "name" in parsed:
                 tool_calls.append(parsed)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError):
             continue
-    
+
+    # Format 2: Apertus — <|tools_prefix|>[{"func_name": {args}}]<|tools_suffix|>
+    apertus_pattern = r'<\|tools_prefix\|>(.*?)<\|tools_suffix\|>'
+    for match in re.findall(apertus_pattern, text, re.DOTALL):
+        try:
+            calls = json.loads(match.strip())
+            if isinstance(calls, list):
+                for call in calls:
+                    if isinstance(call, dict):
+                        for func_name, args in call.items():
+                            tool_calls.append({
+                                "name": func_name,
+                                "arguments": args if isinstance(args, dict) else {},
+                            })
+        except (json.JSONDecodeError, ValueError):
+            continue
+
     return tool_calls
 
 
@@ -85,8 +104,8 @@ def extract_boxed_answer(text):
 def compute_score(solution_str, ground_truth, data_source=None, extra_info=None, **kwargs):
     """
     Score = (IoU * 0.6 + answer_score * 0.4) normalized to [0, 1].
-    
-    ONLY rewards if tool was called using proper <tool_call> format.
+
+    Rewards proper tool calls in either Hermes or Apertus format.
     - No proper tool call -> zero reward
     - Tool execution error -> zero reward (penalize malformed calls)
     - Proper tool call with bbox -> IoU score

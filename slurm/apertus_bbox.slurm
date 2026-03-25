@@ -186,6 +186,7 @@ python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
     trainer.default_local_dir="$SCRATCH/checkpoint/apertus_bbox" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
+    trainer.total_training_steps=5 \
     "$@"
 echo "Training completed!"
 

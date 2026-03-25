@@ -919,7 +919,9 @@ class AgentLoopManager:
         if not hasattr(self, "agent_loop_workers_class"):
             self.agent_loop_workers_class = AgentLoopWorker
 
+        print("[DEBUG AgentLoopManager] Starting _initialize_llm_servers()", flush=True)
         self._initialize_llm_servers()
+        print("[DEBUG AgentLoopManager] _initialize_llm_servers() DONE", flush=True)
         self._init_agent_loop_workers()
 
         # Initially we're in sleep mode.

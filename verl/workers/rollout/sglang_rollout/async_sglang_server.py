@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import asyncio
 import dataclasses
 import json
@@ -20,7 +21,6 @@ import os
 from typing import Any, Optional
 
 import ray
-import sglang
 import sglang.srt.entrypoints.engine
 import torch
 from packaging import version
@@ -77,13 +77,19 @@ class SGLangHttpServer:
         nnodes: int,
         cuda_visible_devices: str,
     ):
-        print(f"SGLang http server: {rollout_mode=}, {replica_rank=}, {node_rank=}, {nnodes=}, {cuda_visible_devices=}")
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
         assert torch.cuda.is_available(), "SGLang http server should run on GPU node"
 
         self.config: RolloutConfig = omega_conf_to_dataclass(config)
-        self.model_config: HFModelConfig = omega_conf_to_dataclass(model_config, dataclass_type=HFModelConfig)
+
+        # Avoid omega_conf_to_dataclass(model_config, dataclass_type=HFModelConfig)
+        # because HFModelConfig.__post_init__ does heavy I/O (loads tokenizer, copies
+        # model files, etc.) which is unnecessary here and can hang in the SGLang
+        # server actor. Instead, build a lightweight model_config with only the
+        # fields the server needs.
+        self.model_config = self._build_lightweight_model_config(model_config)
         self.config.max_model_len = self.model_config.hf_config.max_position_embeddings
+
         self.rollout_mode = rollout_mode
         self.workers = workers
 
@@ -103,13 +109,30 @@ class SGLangHttpServer:
         if self.node_rank == 0:
             self._master_address = self._server_address
             self._master_port, self._master_sock = get_free_port(self._server_address)
-            logger.info(
-                f"SGLangHttpServer, replica_rank: {self.replica_rank}, "
-                f"master address: {self._master_address}, port: {self._master_port}"
-            )
         else:
             self._master_address = None
             self._master_port = None
+
+    @staticmethod
+    def _build_lightweight_model_config(model_config):
+        """Build a lightweight model config without triggering HFModelConfig.__post_init__."""
+        from transformers import AutoConfig
+        from types import SimpleNamespace
+
+        if hasattr(model_config, '__getitem__'):
+            path = model_config.get("path", model_config.get("local_path"))
+            trust_remote_code = model_config.get("trust_remote_code", False)
+        else:
+            path = getattr(model_config, "path", getattr(model_config, "local_path", None))
+            trust_remote_code = getattr(model_config, "trust_remote_code", False)
+
+        hf_config = AutoConfig.from_pretrained(path, trust_remote_code=trust_remote_code)
+        return SimpleNamespace(
+            local_path=path,
+            path=path,
+            trust_remote_code=trust_remote_code,
+            hf_config=hf_config,
+        )
 
     def get_master_address(self):
         """Get master address and port for init NCCL process group."""
@@ -180,14 +203,10 @@ class SGLangHttpServer:
 
         if self.config.prometheus.enable:
             if self.config.prometheus.served_model_name:
-                # Extract model name from path if it's a full path
                 served_model_name = self.config.prometheus.served_model_name
                 if "/" in served_model_name:
-                    # If it's a full path, extract the last part as model name
                     served_model_name = served_model_name.split("/")[-1]
                 args["served_model_name"] = served_model_name
-
-            # start sglang metrics
             args["enable_metrics"] = True
 
         # enable_weights_cpu_backup is supported in sglang>=0.5.3
@@ -223,7 +242,6 @@ class SGLangHttpServer:
         app.warmup_thread_args = (server_args, None, None)
 
         # Manually add Prometheus middleware before starting server
-        # This ensures /metrics endpoint is available immediately
         if server_args.enable_metrics:
             from sglang.srt.utils.common import add_prometheus_middleware
 
@@ -234,10 +252,8 @@ class SGLangHttpServer:
 
     async def wake_up(self):
         if self.rollout_mode == RolloutMode.HYBRID:
-            # Call all workers to switch between trainer mode and rollout mode.
             await asyncio.gather(*[worker.wake_up.remote() for worker in self.workers])
         elif self.rollout_mode == RolloutMode.COLOCATED:
-            # Directly call engine to wake up without sync weights.
             obj = ResumeMemoryOccupationReqInput(tags=["kv_cache", "weights"])
             await self.tokenizer_manager.resume_memory_occupation(obj, None)
             await self.tokenizer_manager.flush_cache()
@@ -266,8 +282,7 @@ class SGLangHttpServer:
         video_data: Optional[list[Any]] = None,
     ) -> TokenOutput:
         """Generate sequence with token-in-token-out."""
-        # TODO(@wuxibin): switch to `/generate` http endpoint once multi-modal support ready.
-        max_possible_tokens = self.config.max_model_len - len(prompt_ids)
+        max_possible_tokens = self.config.max_model_len - len(prompt_ids) - 1
 
         if max_possible_tokens < 0:
             raise ValueError(
@@ -278,7 +293,6 @@ class SGLangHttpServer:
         if "max_new_tokens" in sampling_params:
             max_new_tokens = sampling_params.pop("max_new_tokens")
         elif "max_tokens" in sampling_params:
-            # support vllm-style 'max_tokens' param
             max_new_tokens = sampling_params.pop("max_tokens")
         else:
             max_new_tokens = self.config.response_length + self.config.prompt_length - len(prompt_ids)
@@ -298,8 +312,6 @@ class SGLangHttpServer:
             sampling_params=sampling_params,
             return_logprob=return_logprob,
             image_data=image_data,
-            # TODO: support video input for sglang
-            # video_data=video_data,
         )
         output = await self.tokenizer_manager.generate_request(request, None).__anext__()
         if return_logprob:

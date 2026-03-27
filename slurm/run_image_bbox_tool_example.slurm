@@ -48,7 +48,11 @@ export RAY_TMPDIR="/users/$USER/ray_$USER"
 export RAY_SESSION_DIR="$RAY_TMPDIR"
 
 export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
+export PYTHONUNBUFFERED=1
 
+# Remove stale torch JIT compile lock files (tvm_ffi/flashinfer can leave these
+# behind if a previous job was killed during first import, causing infinite waits)
+rm -f ~/.cache/torch_extensions/*/c_dlpack/lock 2>/dev/null || true
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
@@ -118,7 +122,8 @@ python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
     trainer.default_local_dir="$SCRATCH/checkpoint/bbox" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
-    "$@" 
+    trainer.total_training_steps=5 \
+    "$@"
 
 echo "Training completed."
 

@@ -302,6 +302,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         from verl.utils.torch_dtypes import PrecisionType
 
         assert role in ["actor", "ref"]
+        print(f"[DEBUG _build_model_optimizer] START role={role}", flush=True)
 
         # TiledMLP requires FSDP2 for correct gradient computation
         if use_tiled_mlp and self.config.actor.strategy == "fsdp":
@@ -368,6 +369,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             use_meta_tensor=not actor_model_config.tie_word_embeddings, mesh=self.device_mesh
         )
 
+        print(f"[DEBUG _build_model_optimizer] calling from_pretrained role={role} torch_dtype={torch_dtype}", flush=True)
         with init_context(), warnings.catch_warnings():
             warnings.simplefilter("ignore")
             has_remote_code = hasattr(actor_model_config, "auto_map") and any(
@@ -404,6 +406,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 attn_implementation=attn_implementation,
             )
 
+            print(f"[DEBUG _build_model_optimizer] from_pretrained DONE role={role}", flush=True)
             # Apply Liger kernel to the model if use_liger is set to True
             if use_liger:
                 from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
@@ -474,7 +477,9 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 if self.rank == 0:
                     print("[actor model] No vision tower found.")
 
+        print(f"[DEBUG _build_model_optimizer] before barrier role={role}", flush=True)
         torch.distributed.barrier()
+        print(f"[DEBUG _build_model_optimizer] after barrier role={role}", flush=True)
 
         if self.rank == 0:
             print_model_size(actor_module)
@@ -508,6 +513,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         if self.rank == 0:
             print(f"wrap_policy: {auto_wrap_policy}")
 
+        print(f"[DEBUG _build_model_optimizer] before FSDP wrapping role={role}", flush=True)
         fsdp_mesh = self.device_mesh
         fsdp_enable_zero3 = fsdp_config.reshard_after_forward
         sharding_strategy = get_sharding_strategy(fsdp_mesh, fsdp_enable_zero3)
@@ -557,6 +563,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         else:
             raise NotImplementedError(f"not implement {fsdp_strategy}")
 
+        print(f"[DEBUG _build_model_optimizer] FSDP wrapping DONE role={role}", flush=True)
         if enable_activation_offload:
             enable_activation_offloading(actor_module_fsdp, fsdp_strategy, enable_gradient_checkpointing)
 
@@ -600,10 +607,13 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             actor_optimizer = None
             actor_lr_scheduler = None
 
+        print(f"[DEBUG _build_model_optimizer] END role={role}", flush=True)
         return actor_module_fsdp, actor_optimizer, actor_lr_scheduler, actor_model_config
 
     def _build_rollout(self, trust_remote_code=False):
         from torch.distributed.device_mesh import init_device_mesh
+
+        print("[DEBUG _build_rollout] START", flush=True)
 
         # 1. parse rollout and huggingface model config
         rollout_config: RolloutConfig = omega_conf_to_dataclass(self.config.rollout)
@@ -615,12 +625,15 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         infer_pp = self.config.rollout.pipeline_model_parallel_size
         infer_world_size = infer_tp * infer_pp
         dp = self.world_size // infer_world_size
+        print(f"[DEBUG _build_rollout] world_size={self.world_size} infer_tp={infer_tp} infer_pp={infer_pp} dp={dp}", flush=True)
         assert self.world_size % infer_world_size == 0, (
             f"rollout world_size: {self.world_size} is not divisible by infer_world_size: {infer_world_size}"
         )
+        print("[DEBUG _build_rollout] calling init_device_mesh...", flush=True)
         rollout_device_mesh = init_device_mesh(
             device_name, mesh_shape=(dp, infer_tp, infer_pp), mesh_dim_names=["dp", "infer_tp", "infer_pp"]
         )
+        print("[DEBUG _build_rollout] init_device_mesh DONE", flush=True)
         rollout_name = self.config.rollout.name
 
         self.rollout_device_mesh = rollout_device_mesh
@@ -636,6 +649,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 "rollout", dp_rank=rollout_device_mesh["dp"].get_local_rank(), is_collect=is_collect
             )
 
+        print("[DEBUG _build_rollout] dispatch_collect_info registered", flush=True)
+
         # 3. init trainer and rollout random states
         self.torch_random_states = get_torch_device().get_rng_state()
         gen_dp_rank = rollout_device_mesh["dp"].get_local_rank()
@@ -644,12 +659,18 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         get_torch_device().set_rng_state(self.torch_random_states)
 
         # 4. build rollout model
+        print("[DEBUG _build_rollout] log_gpu_memory_usage before rollout...", flush=True)
         log_gpu_memory_usage(f"Before building {self.config.rollout.name} rollout", logger=logger)
-        self.rollout = get_rollout_class(rollout_config.name, rollout_config.mode)(
+        print("[DEBUG _build_rollout] calling get_rollout_class...", flush=True)
+        rollout_cls = get_rollout_class(rollout_config.name, rollout_config.mode)
+        print(f"[DEBUG _build_rollout] got rollout class: {rollout_cls}, calling constructor...", flush=True)
+        self.rollout = rollout_cls(
             config=rollout_config, model_config=model_config, device_mesh=rollout_device_mesh
         )
+        print("[DEBUG _build_rollout] rollout constructor DONE", flush=True)
         log_gpu_memory_usage(f"After building {self.config.rollout.name} rollout", logger=logger)
 
+        print("[DEBUG _build_rollout] setting FSDP state dict type...", flush=True)
         # Full params
         if torch.distributed.get_world_size() == 1 and fsdp_version(self.actor_module_fsdp) == 1:
             FSDP.set_state_dict_type(
@@ -664,9 +685,11 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 state_dict_config=ShardedStateDictConfig(),
             )
 
+        print("[DEBUG _build_rollout] FSDP state dict type set", flush=True)
         # used for LoRA
         self.base_sync_done: bool = "dummy" not in self.config.rollout.load_format
         self.layered_summon = self.config.rollout.get("layered_summon", False)
+        print("[DEBUG _build_rollout] END", flush=True)
 
         # 5. switch to trainer mode
         # NOTE: It's critical that hybrid engine in trainer mode initially to load checkpoint.
@@ -776,6 +799,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
+        print(f"[DEBUG init_model] START _is_actor={self._is_actor} _is_rollout={self._is_rollout} _is_ref={self._is_ref}", flush=True)
         from verl.workers.actor import DataParallelPPOActor
 
         # This is used to import external_lib into the huggingface systems
@@ -787,6 +811,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         use_fused_kernels = self.config.model.get("use_fused_kernels", False)
 
         if self._is_actor or self._is_rollout:
+            print("[DEBUG init_model] entering actor/rollout model build", flush=True)
             # we need the model for actor and rollout
             if self._is_actor:
                 optim_config = self.config.actor.optim
@@ -795,12 +820,15 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 optim_config = None
                 fsdp_config = FSDPEngineConfig()
 
+            print("[DEBUG init_model] calling copy_to_local...", flush=True)
             local_path = copy_to_local(self.config.model.path, use_shm=use_shm)
+            print(f"[DEBUG init_model] copy_to_local done: {local_path}", flush=True)
             # TiledMLP configuration for memory-efficient MLP computation
             tiled_mlp_config = self.config.model.get("tiled_mlp", {})
             use_tiled_mlp = tiled_mlp_config.get("enabled", False)
             tiled_mlp_shards = tiled_mlp_config.get("num_shards", 4)
 
+            print("[DEBUG init_model] calling _build_model_optimizer for actor...", flush=True)
             (
                 self.actor_module_fsdp,
                 self.actor_optimizer,
@@ -821,27 +849,36 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 use_tiled_mlp=use_tiled_mlp,
                 tiled_mlp_shards=tiled_mlp_shards,
             )
+            print("[DEBUG init_model] _build_model_optimizer for actor DONE", flush=True)
 
             # get the original unwrapped module
             if fsdp_version(self.actor_module_fsdp) == 1:
                 self.actor_module = self.actor_module_fsdp._fsdp_wrapped_module
 
             if self._is_offload_param:
+                print("[DEBUG init_model] offloading actor params to CPU...", flush=True)
                 offload_fsdp_model_to_cpu(self.actor_module_fsdp)
                 log_gpu_memory_usage("After offload actor model during init", logger=logger)
+                print("[DEBUG init_model] actor param offload done", flush=True)
 
             if self._is_offload_optimizer:
+                print("[DEBUG init_model] offloading actor optimizer to CPU...", flush=True)
                 offload_fsdp_optimizer(optimizer=self.actor_optimizer)
                 log_gpu_memory_usage("After offload actor optimizer during init", logger=logger)
+                print("[DEBUG init_model] actor optimizer offload done", flush=True)
 
         if self._is_actor:
+            print("[DEBUG init_model] creating DataParallelPPOActor...", flush=True)
             actor_cfg = omega_conf_to_dataclass(self.config.actor)
             self.actor = DataParallelPPOActor(
                 config=actor_cfg, actor_module=self.actor_module_fsdp, actor_optimizer=self.actor_optimizer
             )
+            print("[DEBUG init_model] DataParallelPPOActor created", flush=True)
 
         if self._is_rollout:
+            print("[DEBUG init_model] building rollout...", flush=True)
             self._build_rollout(trust_remote_code=self.config.model.get("trust_remote_code", False))
+            print("[DEBUG init_model] rollout built", flush=True)
 
         if self._is_ref:
             ref_model_path = self.config.model.path
@@ -877,10 +914,14 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             with open_dict(self.config.ref):
                 self.config.ref.use_remove_padding = use_remove_padding
                 self.config.ref.use_fused_kernels = use_fused_kernels
+            print("[DEBUG init_model] creating ref DataParallelPPOActor...", flush=True)
             self.ref_policy = DataParallelPPOActor(config=self.config.ref, actor_module=self.ref_module_fsdp)
+            print("[DEBUG init_model] ref DataParallelPPOActor created", flush=True)
 
         if self._is_actor:
+            print("[DEBUG init_model] creating FlopsCounter...", flush=True)
             self.flops_counter = FlopsCounter(self.actor_model_config)
+            print("[DEBUG init_model] creating FSDPCheckpointManager...", flush=True)
             self.checkpoint_manager = FSDPCheckpointManager(
                 model=self.actor_module_fsdp,
                 optimizer=self.actor.actor_optimizer,
@@ -888,6 +929,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
                 checkpoint_config=self.config.actor.checkpoint,
             )
+            print("[DEBUG init_model] FSDPCheckpointManager created", flush=True)
 
         if not self._is_actor and self._is_rollout:
             # If ActorRolloutRefWorker is initialized as a standalone rollout,
@@ -901,6 +943,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
                 checkpoint_config=checkpoint_contents,
             )
+        print("[DEBUG init_model] END", flush=True)
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="actor"))
     @DistProfiler.annotate(color="red", role="actor_update")

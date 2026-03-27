@@ -1,0 +1,134 @@
+{%- if tools %}
+{{- '<|system_start|>' }}
+{%- if messages[0]['role'] == 'system' %}
+{%- if messages[0]['content'] is string %}
+{{- messages[0]['content'] }}
+{%- else %}
+{{- messages[0]['content'][0]['text'] }}
+{%- endif %}
+{%- else %}
+{{- 'You are a helpful assistant.' }}
+{%- endif %}
+{{- "\n\nYou have access to the following tools:\n[AVAILABLE_TOOLS]" }}
+{%- for tool in tools %}
+{{- tool | tojson }}
+{%- if not loop.last %}{{- "," }}{% endif %}
+{%- endfor %}
+{{- "[/AVAILABLE_TOOLS]\n\nTo call a tool, output the call between <|tools_prefix|> and <|tools_suffix|> tokens in JSON array format:\n<|tools_prefix|>[{\"function_name\": {arguments}}]<|tools_suffix|>" }}
+{{- '<|system_end|>' }}
+{%- for message in messages %}
+{%- if message['role'] == 'system' and loop.first %}
+{%- elif message['role'] == 'user' %}
+{{- '<|user_start|>' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- else %}
+{%- for content in message['content'] %}
+{%- if content['type'] == 'image' or 'image' in content %}
+{{- '<|image|>' }}
+{%- elif content['type'] == 'text' or 'text' in content %}
+{{- content['text'] }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{{- '<|user_end|>' }}
+{%- elif message['role'] == 'assistant' %}
+{{- '<|assistant_start|>' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- elif message['content'] is not none %}
+{%- for content in message['content'] %}
+{%- if content['type'] == 'text' or 'text' in content %}
+{{- content['text'] }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if message.tool_calls is defined and message.tool_calls %}
+{{- '<|tools_prefix|>[' }}
+{%- for tool_call in message.tool_calls %}
+{%- if tool_call.function is defined %}
+{{- '{"' + tool_call.function.name + '": ' + tool_call.function.arguments + '}' }}
+{%- else %}
+{{- '{"' + tool_call.name + '": ' + tool_call.arguments + '}' }}
+{%- endif %}
+{%- if not loop.last %}{{- ', ' }}{% endif %}
+{%- endfor %}
+{{- ']<|tools_suffix|>' }}
+{%- endif %}
+{{- '<|assistant_end|>' }}
+{%- elif message['role'] == 'tool' %}
+{{- '<|user_start|>' }}
+{{- '[TOOL_RESULTS]' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- else %}
+{%- for content in message['content'] %}
+{%- if content['type'] == 'image' or 'image' in content %}
+{{- '<|image|>' }}
+{%- elif content['type'] == 'text' or 'text' in content %}
+{{- content['text'] }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{{- '[/TOOL_RESULTS]' }}
+{{- '<|user_end|>' }}
+{%- endif %}
+{%- endfor %}
+{%- else %}
+{%- for message in messages %}
+{%- if message['role'] == 'system' %}
+{{- '<|system_start|>' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- else %}
+{{- message['content'][0]['text'] }}
+{%- endif %}
+{{- '<|system_end|>' }}
+{%- elif message['role'] == 'user' %}
+{{- '<|user_start|>' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- else %}
+{%- for content in message['content'] %}
+{%- if content['type'] == 'image' or 'image' in content %}
+{{- '<|image|>' }}
+{%- elif content['type'] == 'text' or 'text' in content %}
+{{- content['text'] }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{{- '<|user_end|>' }}
+{%- elif message['role'] == 'assistant' %}
+{{- '<|assistant_start|>' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- elif message['content'] is not none %}
+{%- for content in message['content'] %}
+{%- if content['type'] == 'text' or 'text' in content %}
+{{- content['text'] }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{{- '<|assistant_end|>' }}
+{%- elif message['role'] == 'tool' %}
+{{- '<|user_start|>' }}
+{{- '[TOOL_RESULTS]' }}
+{%- if message['content'] is string %}
+{{- message['content'] }}
+{%- else %}
+{%- for content in message['content'] %}
+{%- if content['type'] == 'image' or 'image' in content %}
+{{- '<|image|>' }}
+{%- elif content['type'] == 'text' or 'text' in content %}
+{{- content['text'] }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{{- '[/TOOL_RESULTS]' }}
+{{- '<|user_end|>' }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if add_generation_prompt %}
+{{- '<|assistant_start|>' }}
+{%- endif %}

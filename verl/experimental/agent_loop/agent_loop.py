@@ -429,10 +429,17 @@ class AgentLoopWorkerBase:
             agent_loop_configs = OmegaConf.load(resolved_path)
             for agent_loop_config in agent_loop_configs:
                 _agent_loop_registry[agent_loop_config.name] = agent_loop_config
-        if self.config.actor_rollout_ref.model.get("custom_chat_template", None) is not None:
+        custom_chat_template = self.config.actor_rollout_ref.model.get("custom_chat_template", None)
+        if custom_chat_template is None:
+            template_path = os.environ.get("VERL_CUSTOM_CHAT_TEMPLATE_PATH")
+            if template_path and os.path.exists(template_path):
+                with open(template_path, encoding="utf-8") as f:
+                    custom_chat_template = f.read()
+                logger.info("Loaded custom chat template from: %s", template_path)
+        if custom_chat_template is not None:
             if self.processor is not None:
-                self.processor.chat_template = self.config.actor_rollout_ref.model.custom_chat_template
-            self.tokenizer.chat_template = self.config.actor_rollout_ref.model.custom_chat_template
+                self.processor.chat_template = custom_chat_template
+            self.tokenizer.chat_template = custom_chat_template
 
         use_reward_loop = True if self.config.reward_model.use_reward_loop else None
         self.use_reward_loop = use_reward_loop
@@ -915,14 +922,17 @@ class AgentLoopManager:
 
         # for recipe to change
         if not hasattr(self, "rollout_replica_class"):
+            print("[DIAG] calling get_rollout_replica_class...", flush=True)
             self.rollout_replica_class = get_rollout_replica_class(self.config.actor_rollout_ref.rollout.name)
+            print("[DIAG] get_rollout_replica_class done", flush=True)
         if not hasattr(self, "agent_loop_workers_class"):
             self.agent_loop_workers_class = AgentLoopWorker
 
-        print("[DEBUG AgentLoopManager] Starting _initialize_llm_servers()", flush=True)
+        print("[DIAG] calling _initialize_llm_servers...", flush=True)
         self._initialize_llm_servers()
-        print("[DEBUG AgentLoopManager] _initialize_llm_servers() DONE", flush=True)
+        print("[DIAG] _initialize_llm_servers done", flush=True)
         self._init_agent_loop_workers()
+        print("[DIAG] _init_agent_loop_workers done", flush=True)
 
         # Initially we're in sleep mode.
         if self.config.actor_rollout_ref.rollout.free_cache_engine:

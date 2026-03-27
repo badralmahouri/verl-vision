@@ -302,7 +302,11 @@ class RLHFDataset(Dataset):
         for message in messages:
             if not images and not videos:
                 continue
-            assert self.processor is not None, "processor is needed to process image and video"
+            if self.processor is None:
+                # No processor (e.g. Apertus uses IBQ tokenizer in agent loop).
+                # Keep images in the example dict for later processing.
+                example[self.image_key] = images
+                return messages
 
             content = message["content"]
             if not isinstance(content, str):

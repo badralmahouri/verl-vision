@@ -57,11 +57,21 @@ VQ_MODEL_PATH="/capstor/store/cscs/swissai/infra01/MLLM/tokenizer/Emu3.5-VisionT
 export VQ_MODEL_PATH
 export RAY_worker_env_VQ_MODEL_PATH="$VQ_MODEL_PATH"
 
+export PYTHONUNBUFFERED=1
+
+# Remove stale torch JIT compile lock files (tvm_ffi/flashinfer can leave these
+# behind if a previous job was killed during first import, causing infinite waits)
+rm -f ~/.cache/torch_extensions/*/c_dlpack/lock 2>/dev/null || true
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
 ulimit -n 65535
 BASE="/users/$USER/verl-vision"
+
+# Custom chat template for Apertus tool calling support
+CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/apertus_tool_chat_template.jinja2"
+export VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
+export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 
 # configs
 CONFIG_PATH="$BASE/examples/sglang_multiturn/config"
@@ -153,6 +163,14 @@ else
     ((ERROR_COUNT++))
 fi
 
+# Chat template check
+if [ -f "$CHAT_TEMPLATE_PATH" ]; then
+    echo "✓ Chat template: $CHAT_TEMPLATE_PATH"
+else
+    echo "✗ Chat template NOT found: $CHAT_TEMPLATE_PATH"
+    ((ERROR_COUNT++))
+fi
+
 if [ $ERROR_COUNT -gt 0 ]; then
     echo ""
     echo "ERROR: $ERROR_COUNT pre-flight checks failed. Fix the above and retry."
@@ -167,7 +185,7 @@ echo "  VQ model (IBQ)     : $VQ_MODEL_PATH"
 echo "  Train data         : $TRAIN_FILE"
 echo "  Val data           : $VAL_FILE"
 echo "  Tool config        : $TOOL_CONFIG_PATH"
-echo "  Chat template      : (loaded from HF checkpoint tokenizer)"
+echo "  Chat template      : $CHAT_TEMPLATE_PATH"
 echo "==================================================================="
 echo ""
 

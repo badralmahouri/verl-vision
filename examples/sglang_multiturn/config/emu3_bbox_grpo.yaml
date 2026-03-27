@@ -14,9 +14,9 @@ data:
   train_files: null
   val_files: null
 
-  # Tokenization settings
-  max_prompt_length: 16384
-  max_response_length: 1024
+  # Tokenization settings (must fit within model's max_position_embeddings=8192)
+  max_prompt_length: 4096
+  max_response_length: 4096
 
   # Batch settings
   train_batch_size: 16
@@ -55,6 +55,7 @@ actor_rollout_ref:
       param_offload: True
       optimizer_offload: True
       model_dtype: bfloat16
+      use_torch_compile: False
 
   # Model config — Apertus checkpoint
   model:
@@ -87,6 +88,7 @@ actor_rollout_ref:
     fsdp_config:
       param_offload: True
       model_dtype: bfloat16
+      use_torch_compile: False
 
 algorithm:
   adv_estimator: grpo

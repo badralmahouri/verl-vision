@@ -21,11 +21,21 @@ import os
 from typing import Generator
 
 import ray
+import sglang.srt.entrypoints.engine
 import torch
+from sglang.srt.server_args import ServerArgs
+from sglang.srt.utils import (
+    assert_pkg_version,
+    is_cuda,
+    set_prometheus_multiproc_dir,
+    set_ulimit,
+)
+from sglang.srt.weight_sync.utils import update_weights as sgl_update_weights
 from torch.distributed.device_mesh import DeviceMesh
 
 from verl.workers.config import HFModelConfig, RolloutConfig
 from verl.workers.rollout.base import BaseRollout
+from verl.workers.rollout.sglang_rollout.http_server_engine import AsyncHttpServerAdapter
 from verl.workers.rollout.sglang_rollout.utils import get_named_tensor_buckets
 from verl.workers.rollout.utils import is_valid_ipv6_address
 
@@ -34,16 +44,7 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 # patch to avoid issue https://github.com/sgl-project/sglang/issues/6723
-# Defined at module level so async_sglang_server.py can import it, but the heavy
-# sglang imports are deferred inside the function body (only runs in the server process).
-def _set_envs_and_config(server_args):
-    from sglang.srt.utils import (
-        assert_pkg_version,
-        is_cuda,
-        set_prometheus_multiproc_dir,
-        set_ulimit,
-    )
-
+def _set_envs_and_config(server_args: ServerArgs):
     # Set global environments
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     os.environ["NCCL_CUMEM_ENABLE"] = "0"
@@ -77,9 +78,7 @@ def _set_envs_and_config(server_args):
     mp.set_start_method("spawn", force=True)
 
 
-# NOTE: The monkey-patch is NOT applied at module load time to avoid importing
-# sglang.srt.entrypoints.engine in FSDP worker processes (causes hangs).
-# Instead, async_sglang_server.py applies it just before launching the server.
+sglang.srt.entrypoints.engine._set_envs_and_config = _set_envs_and_config
 
 
 # because chatCompletion is an async method, it makes the whole ray actor be an async actor
@@ -114,7 +113,7 @@ class ServerAdapter(BaseRollout):
             fp8_block_quant_kwargs = dict(FP8_BLOCK_QUANT_KWARGS)
             model_config.hf_config.quantization_config = fp8_block_quant_kwargs
         super().__init__(config, model_config, device_mesh)
-        self._engine = None
+        self._engine: AsyncHttpServerAdapter = None
 
         rank = int(os.environ["RANK"])
         local_world_size = int(os.environ["RAY_LOCAL_WORLD_SIZE"])
@@ -135,8 +134,6 @@ class ServerAdapter(BaseRollout):
             f"replica_rank={self.replica_rank} node_rank={self.node_rank}, "
             f"server address: {server_address}, port: {server_port}"
         )
-        from verl.workers.rollout.sglang_rollout.http_server_engine import AsyncHttpServerAdapter
-
         host = f"[{server_address}]" if is_valid_ipv6_address(server_address) else server_address
         self._engine = AsyncHttpServerAdapter(
             model_path=self.model_config.local_path, host=host, port=server_port, launch_server=False
@@ -186,8 +183,6 @@ class ServerAdapter(BaseRollout):
             )
         else:
             weights = weights
-
-        from sglang.srt.weight_sync.utils import update_weights as sgl_update_weights
 
         for params_batch in get_named_tensor_buckets(weights, update_weights_bucket_bytes):
             await sgl_update_weights(

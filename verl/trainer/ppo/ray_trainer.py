@@ -909,7 +909,6 @@ class RayPPOTrainer:
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg[str(actor_role)]
         self.actor_rollout_wg.init_model()
-        print("[DIAG] init_model() done", flush=True)
 
         if self.ref_in_actor:
             self.ref_policy_wg = self.actor_rollout_wg
@@ -923,22 +922,18 @@ class RayPPOTrainer:
         if manager_class_fqn:
             AgentLoopManager = load_class_from_fqn(manager_class_fqn, "AgentLoopManager")
         else:
-            print("[DIAG] importing AgentLoopManager...", flush=True)
             from verl.experimental.agent_loop import AgentLoopManager
-            print("[DIAG] AgentLoopManager imported", flush=True)
 
         if self.config.reward_model.enable and self.config.reward_model.enable_resource_pool:
             rm_resource_pool = self.resource_pool_manager.get_resource_pool(Role.RewardModel)
         else:
             rm_resource_pool = None
 
-        print("[DIAG] creating AgentLoopManager...", flush=True)
         self.async_rollout_manager = AgentLoopManager(
             config=self.config,
             worker_group=self.actor_rollout_wg,
             rm_resource_pool=rm_resource_pool,
         )
-        print("[DIAG] AgentLoopManager created", flush=True)
 
     def _save_checkpoint(self):
         from verl.utils.fs import local_mkdir_safe

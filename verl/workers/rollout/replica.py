@@ -242,6 +242,7 @@ def _load_sglang():
         import sys
         import types
         from unittest.mock import Mock
+
         mock_vllm = types.ModuleType("vllm")
 
         mock_custom_ops = types.ModuleType("vllm._custom_ops")

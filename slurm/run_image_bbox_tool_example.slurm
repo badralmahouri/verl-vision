@@ -8,7 +8,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
-#SBATCH --gpus-per-node=1
+#SBATCH --gpus-per-node=4
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -50,9 +50,8 @@ export RAY_SESSION_DIR="$RAY_TMPDIR"
 export PYTHONPATH="/users/$USER/data_postprocess:/users/$USER/verl-vision:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
 
-# Remove stale torch JIT compile lock files (tvm_ffi/flashinfer can leave these
-# behind if a previous job was killed during first import, causing infinite waits)
-rm -f ~/.cache/torch_extensions/*/c_dlpack/lock 2>/dev/null || true
+# Clean stale torch extension caches that cause import hangs on GH200 (SD-68483)
+rm -rf ~/.cache/torch_extensions/ 2>/dev/null || true
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus

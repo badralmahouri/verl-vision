@@ -39,7 +39,7 @@ actor_rollout_ref:
   actor:
     _target_: verl.workers.config.actor.FSDPActorConfig
     ppo_mini_batch_size: 16
-    ppo_micro_batch_size_per_gpu: 8
+    ppo_micro_batch_size_per_gpu: 4
     use_dynamic_bsz: False
     optim:
       lr: 1e-6
@@ -92,7 +92,7 @@ trainer:
   logger: ["console", "tensorboard"]  # Added tensorboard for metrics
   project_name: 'multimodal_tool_example'
   experiment_name: 'image_bbox_tool_single_gpu_example'
-  n_gpus_per_node: 1
+  n_gpus_per_node: 4
   nnodes: 1
   save_freq: 10  # -1 means don't save intermediate checkpoints
   test_freq: 10  # Validate every 10 steps

@@ -4,11 +4,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=230000
+#SBATCH --mem=460000
 #SBATCH --time=12:00:00
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
-#SBATCH --gpus-per-node=1
+#SBATCH --gpus-per-node=4
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -59,17 +59,16 @@ export RAY_worker_env_VQ_MODEL_PATH="$VQ_MODEL_PATH"
 
 export PYTHONUNBUFFERED=1
 
-# Remove stale torch JIT compile lock files (tvm_ffi/flashinfer can leave these
-# behind if a previous job was killed during first import, causing infinite waits)
-rm -f ~/.cache/torch_extensions/*/c_dlpack/lock 2>/dev/null || true
+# Clean stale torch extension caches that cause import hangs on GH200 (SD-68483)
+rm -rf ~/.cache/torch_extensions/ 2>/dev/null || true
 
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi --list-gpus
 ulimit -n 65535
 BASE="/users/$USER/verl-vision"
 
-# Custom chat template for Apertus tool calling support
-CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/apertus_tool_chat_template.jinja2"
+# Use the model's built-in chat template (trained format: <|developer_start|> + TypeScript tools)
+CHAT_TEMPLATE_PATH="${APERTUS_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF}/chat_template.jinja"
 export VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 

@@ -16,7 +16,7 @@ data:
 
   # Tokenization settings (must fit within model's max_position_embeddings=8192)
   max_prompt_length: 4096
-  max_response_length: 4096
+  max_response_length: 1024
 
   # Batch settings
   train_batch_size: 16
@@ -43,7 +43,7 @@ actor_rollout_ref:
   actor:
     _target_: verl.workers.config.actor.FSDPActorConfig
     ppo_mini_batch_size: 16
-    ppo_micro_batch_size_per_gpu: 8
+    ppo_micro_batch_size_per_gpu: 4
     use_dynamic_bsz: False
     optim:
       lr: 1e-6
@@ -52,8 +52,8 @@ actor_rollout_ref:
     kl_loss_type: low_var_kl
     entropy_coeff: 0
     fsdp_config:
-      param_offload: True
-      optimizer_offload: True
+      param_offload: False
+      optimizer_offload: False
       model_dtype: bfloat16
       use_torch_compile: False
 
@@ -66,7 +66,7 @@ actor_rollout_ref:
   rollout:
     name: sglang
     mode: async
-    gpu_memory_utilization: 0.35
+    gpu_memory_utilization: 0.5
     n: 4
     log_prob_micro_batch_size_per_gpu: 2
     tensor_model_parallel_size: 1
@@ -86,7 +86,7 @@ actor_rollout_ref:
   ref:
     log_prob_micro_batch_size_per_gpu: 2
     fsdp_config:
-      param_offload: True
+      param_offload: False
       model_dtype: bfloat16
       use_torch_compile: False
 
@@ -99,7 +99,7 @@ trainer:
   logger: ["console", "tensorboard"]
   project_name: 'apertus_bbox_training'
   experiment_name: 'apertus_bbox_tool'
-  n_gpus_per_node: 1
+  n_gpus_per_node: 4
   nnodes: 1
   save_freq: 10
   test_freq: 10

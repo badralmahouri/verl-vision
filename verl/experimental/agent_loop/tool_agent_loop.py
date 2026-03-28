@@ -374,6 +374,17 @@ class ToolAgentLoop(AgentLoopBase):
             response_ids = await self.loop.run_in_executor(
                 None, lambda: self.tokenizer.encode(tool_response_text, add_special_tokens=False)
             )
+        elif self.tool_parser_name == "apertus":
+            # Apertus model expects tool results as [content1, content2] inside
+            # the assistant turn, then <|assistant_end|><|assistant_start|> to
+            # start the next generation turn.
+            tool_results_text = "[" + ", ".join(msg["content"] for msg in add_messages) + "]"
+            tool_ids = await self.loop.run_in_executor(
+                None, lambda: self.tokenizer.encode(tool_results_text, add_special_tokens=False)
+            )
+            end_id = self.tokenizer.convert_tokens_to_ids("<|assistant_end|>")
+            start_id = self.tokenizer.convert_tokens_to_ids("<|assistant_start|>")
+            response_ids = tool_ids + [end_id, start_id]
         else:
             response_ids = await self.apply_chat_template(
                 add_messages,

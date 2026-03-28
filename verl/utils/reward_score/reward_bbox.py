@@ -88,6 +88,23 @@ def extract_bbox_from_tool_calls(tool_calls):
     return None
 
 
+def extract_bbox_from_freetext(text):
+    """
+    Fallback: extract bbox coordinates from free text.
+    Looks for patterns like [x1, y1, x2, y2] or bbox_2d: [x1, y1, x2, y2].
+    Returns the first valid 4-int coordinate found, or None.
+    """
+    if not text:
+        return None
+    # Pattern: 4 integers in brackets, e.g. [100, 200, 300, 400]
+    for match in re.finditer(r'\[(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\]', text):
+        coords = [int(match.group(i)) for i in range(1, 5)]
+        # Sanity: x2 > x1 and y2 > y1, all values reasonable for an image
+        if coords[2] > coords[0] and coords[3] > coords[1] and all(0 <= c <= 2000 for c in coords):
+            return coords
+    return None
+
+
 def extract_boxed_answer(text):
     """Extract answer from \\boxed{...} or <boxed>...</boxed>."""
     if not text:
@@ -130,39 +147,54 @@ def compute_score(solution_str, ground_truth, data_source=None, extra_info=None,
         
         tool_execution_failed = tool_execution_errors > 0
         
-        # Extract bbox from proper tool calls only
+        # Extract bbox from proper tool calls first, then fallback to free text
         pred_bbox = extract_bbox_from_tool_calls(tool_calls) if used_real_tool else None
-        
+        used_freetext = False
+        if not pred_bbox:
+            pred_bbox = extract_bbox_from_freetext(solution)
+            if pred_bbox:
+                used_freetext = True
+
         # Extract boxed answer
         boxed_answer = extract_boxed_answer(solution)
-        
+
         # Compute component scores
         iou_score = 0.0
         answer_score = 0.0
-        
+
         if pred_bbox and expected_bbox:
             iou_score = compute_iou(pred_bbox, expected_bbox)
-        
+
         # Answer check
         if boxed_answer and expected_answer:
             exp_clean = re.sub(r'</?boxed>', '', expected_answer).strip().lower()
             pred_clean = boxed_answer.strip().lower()
             if pred_clean == exp_clean or pred_clean in exp_clean or exp_clean in pred_clean:
                 answer_score = 1.0
-        
+
         # Final normalized score [0, 1]
+        # Tool call with bbox: full credit (0.6 * IoU + 0.4 * answer)
+        # Free-text bbox: partial credit (0.4 * IoU + 0.3 * answer) — incentivizes tool format
+        # Tool call without bbox: small credit
+        # Nothing: zero
         if tool_execution_failed: score = 0.0
         elif used_real_tool and pred_bbox: score = (iou_score * 0.6) + (answer_score * 0.4)
         elif used_real_tool: score = 0.1 + (answer_score * 0.3)
+        elif used_freetext and pred_bbox: score = (iou_score * 0.4) + (answer_score * 0.3)
+        elif boxed_answer: score = answer_score * 0.05  # Tiny signal for correct answer without bbox
         else: score = 0.0
-        
+
+        # Log first 200 chars of response for debugging model output
+        response_preview = solution[:200].replace('\n', '\\n') if solution else ""
         logger.error(json.dumps({
             "score": round(score, 4),
             "iou": round(iou_score, 4),
             "answer_score": round(answer_score, 4),
             "num_tool_calls": len(tool_calls),
+            "freetext_bbox": used_freetext,
             "pred_bbox": pred_bbox,
             "expected_bbox": expected_bbox,
+            "response_preview": response_preview,
         }))
         
         return score

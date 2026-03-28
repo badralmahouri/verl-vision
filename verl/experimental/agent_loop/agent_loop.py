@@ -287,7 +287,7 @@ class AgentLoopBase(ABC):
 
             model_inputs = self.processor(
                 text=[raw_prompt],
-                images=images,
+                images=images if images else None,
                 videos=videos,
                 video_metadatas=video_metadatas,
                 return_tensors="pt",
@@ -328,6 +328,11 @@ class AgentLoopBase(ABC):
         3. Tokenize the full text (images are now part of the token sequence)
         """
         from verl.utils.apertus_vision import encode_image
+
+        # Normalize OpenAI format tools to flat format for model's template
+        # Model's chat_template.jinja accesses tool.name/tool.description at top level
+        if tools:
+            tools = [t["function"] if "function" in t else t for t in tools]
 
         # Step 1: Get raw text with image placeholders
         raw_prompt = await self.loop.run_in_executor(
@@ -534,9 +539,17 @@ class AgentLoopWorkerBase:
                     self._run_agent_loop(sampling_params, trajectory_info[i], trace=trace_this_sample, **kwargs)
                 )
             )
-        outputs = await asyncio.gather(*tasks)
+        try:
+            outputs = await asyncio.gather(*tasks)
+        except Exception as e:
+            logger.error(f"Agent loop gather failed for {len(tasks)} tasks: {e}", exc_info=True)
+            raise
 
-        output = self._postprocess(outputs)
+        try:
+            output = self._postprocess(outputs)
+        except Exception as e:
+            logger.error(f"Agent loop _postprocess failed: {e}", exc_info=True)
+            raise
 
         return output
 
@@ -809,6 +822,7 @@ class AgentLoopWorkerBase:
         if all(score is not None for score in scores):
             prompt_length = prompt_ids.size(1)
             response_length = attention_mask[:, prompt_length:].sum(dim=1) - 1
+            response_length = response_length.clamp(min=0, max=response_mask.size(1) - 1)
             rm_scores = torch.zeros_like(response_mask, dtype=torch.float32)
             rm_scores[torch.arange(response_mask.size(0)), response_length] = torch.tensor(scores, dtype=torch.float32)
             batch["rm_scores"] = rm_scores
@@ -922,17 +936,12 @@ class AgentLoopManager:
 
         # for recipe to change
         if not hasattr(self, "rollout_replica_class"):
-            print("[DIAG] calling get_rollout_replica_class...", flush=True)
             self.rollout_replica_class = get_rollout_replica_class(self.config.actor_rollout_ref.rollout.name)
-            print("[DIAG] get_rollout_replica_class done", flush=True)
         if not hasattr(self, "agent_loop_workers_class"):
             self.agent_loop_workers_class = AgentLoopWorker
 
-        print("[DIAG] calling _initialize_llm_servers...", flush=True)
         self._initialize_llm_servers()
-        print("[DIAG] _initialize_llm_servers done", flush=True)
         self._init_agent_loop_workers()
-        print("[DIAG] _init_agent_loop_workers done", flush=True)
 
         # Initially we're in sleep mode.
         if self.config.actor_rollout_ref.rollout.free_cache_engine:

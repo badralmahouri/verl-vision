@@ -179,12 +179,14 @@ class ImageBBoxTool(BaseTool):
         self.timeout = config.get("timeout", 30)
 
         self.enable_global_rate_limit = config.get("enable_global_rate_limit", True)
-        self.execution_pool = init_visual_execution_pool(
-            num_workers=self.num_workers,
-            enable_global_rate_limit=self.enable_global_rate_limit,
-            rate_limit=self.rate_limit,
-            mode=PoolMode.ThreadMode,
-        )
+        # Disabled: execution_pool is never used in execute() — orphan Ray actors
+        # cause SIGABRT during cleanup, bringing down the training job.
+        # self.execution_pool = init_visual_execution_pool(
+        #     num_workers=self.num_workers,
+        #     enable_global_rate_limit=self.enable_global_rate_limit,
+        #     rate_limit=self.rate_limit,
+        #     mode=PoolMode.ThreadMode,
+        # )
         logger.info(f"Initialized ImageBBoxTool with config: {config}")
 
     def _validate_bbox(self, left: float, top: float, right: float, bottom: float) -> bool:

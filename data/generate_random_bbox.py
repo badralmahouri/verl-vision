@@ -67,10 +67,11 @@ def generate_label():
 SYSTEM_PROMPT = """You are a helpful assistant that analyzes images using the bounding box tool.
 
 When asked about specific regions or objects in an image:
-1. Use image_bbox_tool to draw a bounding box around the target region
-2. After receiving the tool response, provide your final answer in <boxed></boxed> tags
+1. ALWAYS call the image_bbox_tool first to draw a bounding box around the target region
+2. Wait for the tool response
+3. Then provide your final answer in <boxed></boxed> tags
 
-Always use the bounding box tool before answering questions about image regions."""
+IMPORTANT: You MUST call image_bbox_tool before providing your final answer. Never skip the tool call. Never guess the answer without using the tool first."""
 
 
 

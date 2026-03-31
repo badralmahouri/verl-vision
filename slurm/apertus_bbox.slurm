@@ -59,6 +59,10 @@ export RAY_worker_env_VQ_MODEL_PATH="$VQ_MODEL_PATH"
 
 export PYTHONUNBUFFERED=1
 
+# Persistent per-sample reward debug log (survives after job ends)
+export REWARD_DEBUG_LOG="/users/$USER/verl-vision/slurm/logs/reward_debug_${SLURM_JOB_ID}.jsonl"
+export RAY_worker_env_REWARD_DEBUG_LOG="$REWARD_DEBUG_LOG"
+
 # Clean stale torch extension caches that cause import hangs on GH200 (SD-68483)
 rm -rf ~/.cache/torch_extensions/ 2>/dev/null || true
 
@@ -67,8 +71,9 @@ nvidia-smi --list-gpus
 ulimit -n 65535
 BASE="/users/$USER/verl-vision"
 
-# Use the model's built-in chat template (trained format: <|developer_start|> + TypeScript tools)
-CHAT_TEMPLATE_PATH="${APERTUS_CHECKPOINT:-/capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF}/chat_template.jinja"
+# Modified template: model's native format (developer_start + TypeScript) with added
+# explicit tool-call format instructions so the model knows to use <|tools_prefix|>
+CHAT_TEMPLATE_PATH="$BASE/examples/sglang_multiturn/config/apertus_tool_chat_template.jinja2"
 export VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 export RAY_worker_env_VERL_CUSTOM_CHAT_TEMPLATE_PATH="$CHAT_TEMPLATE_PATH"
 
@@ -201,9 +206,9 @@ python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     actor_rollout_ref.model.tokenizer_path="$APERTUS_CHECKPOINT" \
     actor_rollout_ref.model.trust_remote_code=True \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
-    trainer.default_local_dir="$SCRATCH/checkpoint/apertus_bbox" \
+    trainer.default_local_dir="$SCRATCH/checkpoint/apertus_bbox_v3" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
-    trainer.total_training_steps=5 \
+    trainer.total_training_steps=50 \
     "$@"
 echo "Training completed!"
 
@@ -212,7 +217,7 @@ echo "Training completed!"
 # Named with job ID so re-runs never overwrite. Delete stale logs manually.
 # To plot: python slurm/plot.py slurm/logs/metrics_apertus_bbox_${SLURM_JOB_ID}.log
 OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
-METRICS_LOG="${BASE}/slurm/logs/metrics_apertus_bbox_${SLURM_JOB_ID}.log"
+METRICS_LOG="${BASE}/slurm/logs/apertus_bbox_${SLURM_JOB_ID}.log"
 mkdir -p "${BASE}/slurm/logs"
 sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
 echo "Metrics saved to: $METRICS_LOG"

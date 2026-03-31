@@ -63,7 +63,7 @@ actor_rollout_ref:
   rollout:
     name: sglang
     mode: async
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.85
     n: 4  # Reduced rollout samples for testing
     log_prob_micro_batch_size_per_gpu: 2
     tensor_model_parallel_size: 1
@@ -73,7 +73,7 @@ actor_rollout_ref:
       tool_config_path: null  # Will be set via command line
       format: hermes  # Use <tool_call> format for tool parsing
     trace:
-      backend: tensorboard
+      backend: null  # Only weave/mlflow supported; text traces use log_val_generations
       token2text: True
   
   # Reference model config
@@ -103,6 +103,7 @@ trainer:
   # Logging configuration
   log_freq: 1  # Log metrics every step
   val_before_train: True  # Run validation before training starts
+  log_val_generations: 10  # Log N validation samples as text to TensorBoard
 
 # Reward model config - keeping it disabled as per your setup
 reward_model:

@@ -52,8 +52,8 @@ actor_rollout_ref:
     kl_loss_type: low_var_kl
     entropy_coeff: 0
     fsdp_config:
-      param_offload: False
-      optimizer_offload: False
+      param_offload: True
+      optimizer_offload: True
       model_dtype: bfloat16
       use_torch_compile: False
 
@@ -66,7 +66,7 @@ actor_rollout_ref:
   rollout:
     name: sglang
     mode: async
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.85
     n: 4
     log_prob_micro_batch_size_per_gpu: 2
     tensor_model_parallel_size: 1
@@ -79,14 +79,14 @@ actor_rollout_ref:
       tool_config_path: null  # Will be set via command line
       format: apertus
     trace:
-      backend: tensorboard
+      backend: null  # Only weave/mlflow supported; text traces use log_val_generations
       token2text: True
 
   # Reference model config
   ref:
     log_prob_micro_batch_size_per_gpu: 2
     fsdp_config:
-      param_offload: False
+      param_offload: True
       model_dtype: bfloat16
       use_torch_compile: False
 
@@ -108,6 +108,7 @@ trainer:
   default_local_dir: null  # Will be set via command line
   log_freq: 1
   val_before_train: True
+  log_val_generations: 10  # Log N validation samples as text to TensorBoard
 
 # Reward model config - disabled, using rule-based rewards from bbox tool
 reward_model:

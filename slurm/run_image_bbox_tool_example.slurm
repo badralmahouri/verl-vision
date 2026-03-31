@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=230000
+#SBATCH --mem=460000
 #SBATCH --time=12:00:00
 #SBATCH --environment=verl_env
 #SBATCH --partition=normal
@@ -119,9 +119,9 @@ python3 /users/$USER/verl-vision/data_postprocess/verl_metrics.py \
     data.train_files="$TRAIN_FILE" \
     data.val_files="$VAL_FILE" \
     actor_rollout_ref.rollout.trace.backend=tensorboard \
-    trainer.default_local_dir="$SCRATCH/checkpoint/bbox" \
+    trainer.default_local_dir="$SCRATCH/checkpoint/qwen_bbox_v2" \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG_PATH" \
-    trainer.total_training_steps=5 \
+    trainer.total_training_steps=50 \
     "$@"
 
 echo "Training completed."
@@ -131,8 +131,14 @@ echo "Training completed."
 # Named with job ID so re-runs never overwrite. Delete stale logs manually.
 # To plot: python slurm/plot.py slurm/logs/metrics_bbox_${SLURM_JOB_ID}.log
 OUT_FILE="${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
-METRICS_LOG="${BASE}/slurm/logs/metrics_bbox_${SLURM_JOB_ID}.log"
+METRICS_LOG="${BASE}/slurm/logs/qwen_bbox_${SLURM_JOB_ID}.log"
 mkdir -p "${BASE}/slurm/logs"
 sed -r 's/\x1b\[[0-9;]*m//g' "$OUT_FILE" | grep -E "step:[0-9]+" > "$METRICS_LOG"
 echo "Metrics saved to: $METRICS_LOG"
-echo "To plot: python slurm/plot.py $METRICS_LOG"
+
+# --- Auto-generate plots ---
+PLOT_DIR="${BASE}/slurm/plots/qwen_bbox_${SLURM_JOB_ID}"
+echo "Generating plots to: $PLOT_DIR"
+python3 "${BASE}/slurm/plot.py" "$METRICS_LOG" "$PLOT_DIR" || echo "WARNING: Plot generation failed"
+echo "Plots saved to: $PLOT_DIR"
+echo "To re-plot: python slurm/plot.py $METRICS_LOG $PLOT_DIR"

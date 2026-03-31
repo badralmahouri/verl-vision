@@ -52,7 +52,7 @@ class NaiveRewardLoopManager(RewardLoopManagerBase):
         extra_info["rollout_reward_scores"] = rollout_reward_scores
 
         response_str = await self.loop.run_in_executor(
-            None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
+            None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
         )
         if self.is_async_reward_score:
             result = await self.compute_score(

@@ -7,6 +7,7 @@ Normalized to [0, 1] range.
 
 import logging
 import json
+import os
 import sys
 import re
 
@@ -18,6 +19,22 @@ if not logger.handlers:
     h.setLevel(logging.ERROR)
     h.setFormatter(logging.Formatter("[BBOX_REWARD] %(message)s"))
     logger.addHandler(h)
+
+_reward_log_file = None
+
+
+def _get_reward_log():
+    """Return a persistent file handle for per-sample reward debug logs.
+
+    Writes to the path in REWARD_DEBUG_LOG env var (default: /tmp/reward_bbox_debug.jsonl).
+    Each line is a JSON object with score, iou, bbox, and response preview.
+    """
+    global _reward_log_file
+    if _reward_log_file is None:
+        log_path = os.environ.get("REWARD_DEBUG_LOG", "/tmp/reward_bbox_debug.jsonl")
+        os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+        _reward_log_file = open(log_path, "a")
+    return _reward_log_file
 
 
 def compute_iou(box1, box2):
@@ -184,9 +201,9 @@ def compute_score(solution_str, ground_truth, data_source=None, extra_info=None,
         elif boxed_answer: score = answer_score * 0.05  # Tiny signal for correct answer without bbox
         else: score = 0.0
 
-        # Log first 200 chars of response for debugging model output
+        # Log per-sample reward details to persistent file for post-job analysis
         response_preview = solution[:200].replace('\n', '\\n') if solution else ""
-        logger.error(json.dumps({
+        debug_data = json.dumps({
             "score": round(score, 4),
             "iou": round(iou_score, 4),
             "answer_score": round(answer_score, 4),
@@ -195,7 +212,14 @@ def compute_score(solution_str, ground_truth, data_source=None, extra_info=None,
             "pred_bbox": pred_bbox,
             "expected_bbox": expected_bbox,
             "response_preview": response_preview,
-        }))
+        })
+        try:
+            log_file = _get_reward_log()
+            log_file.write(debug_data + "\n")
+            log_file.flush()
+        except Exception:
+            pass
+        logger.error(debug_data)
         
         return score
         

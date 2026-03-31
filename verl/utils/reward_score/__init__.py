@@ -122,6 +122,10 @@ def default_compute_score(
         from . import reward_crop
 
         res = reward_crop.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source == "zoom":
+        from . import reward_zoom
+
+        res = reward_zoom.compute_score(solution_str, ground_truth, extra_info=extra_info)
     elif data_source in ["refcoco_bbox", "refcoco_crop"]:
         from . import reward_refcoco
 

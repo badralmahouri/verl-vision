@@ -1,0 +1,115 @@
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  # Data paths - set via command line or SLURM script
+  train_files: null
+  val_files: null
+
+  # Tokenization settings
+  max_prompt_length: 16384
+  max_response_length: 1024
+
+  # Batch settings
+  train_batch_size: 16
+  val_batch_size: 16
+
+  # Key names in parquet
+  prompt_key: 'prompt'
+  response_key: 'answer'
+
+  # Processing options
+  return_raw_chat: True  # Important for multi-turn with images
+  filter_overlong_prompts: False
+  truncation: 'error'
+
+  # Dataset worker settings
+  num_workers: 0
+  prefetch_factor: null
+
+actor_rollout_ref:
+  hybrid_engine: True
+
+  # Actor config
+  actor:
+    _target_: verl.workers.config.actor.FSDPActorConfig
+    ppo_mini_batch_size: 16
+    ppo_micro_batch_size_per_gpu: 4
+    use_dynamic_bsz: False
+    optim:
+      lr: 1e-6
+    use_kl_loss: True
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config:
+      param_offload: True
+      optimizer_offload: True
+      use_torch_compile: False
+
+  # Model config
+  model:
+    path: 'Qwen/Qwen2.5-VL-3B-Instruct'
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+
+  # Rollout config
+  rollout:
+    name: sglang
+    mode: async
+    gpu_memory_utilization: 0.85
+    n: 4  # 4 rollout samples for GRPO group
+    log_prob_micro_batch_size_per_gpu: 2
+    tensor_model_parallel_size: 1
+    multi_turn:
+      enable: True
+      max_assistant_turns: 5
+      tool_config_path: null  # Set via command line -> crop_only_tool_config.yaml
+      format: hermes  # Qwen uses <tool_call> format
+    trace:
+      backend: null
+      token2text: True
+
+  # Reference model config
+  ref:
+    log_prob_micro_batch_size_per_gpu: 2
+    fsdp_config:
+      param_offload: True
+      use_torch_compile: False
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: True
+
+trainer:
+  critic_warmup: 0
+  logger: ["console", "tensorboard"]
+  project_name: 'qwen_zoom_training'
+  experiment_name: 'zoom_open_tool_use'
+  n_gpus_per_node: 4
+  nnodes: 1
+  save_freq: 20  # More checkpoints to track learning curve
+  test_freq: 10
+  total_training_steps: 200  # Papers suggest 150-200 for binary reward
+  total_epochs: 200
+  default_local_dir: null  # Set via command line
+
+  # Logging
+  log_freq: 1
+  val_before_train: True
+  log_val_generations: 10  # Log validation samples to TensorBoard
+
+# Reward model disabled — using rule-based reward (reward_zoom.py)
+reward_model:
+  enable: False
+  reward_manager: naive
+  micro_batch_size_per_gpu: 64
+  model:
+    path: /iopsstor/scratch/cscs/abollengier/models/FsfairX-LLaMA3-RM-v0.1
+    input_tokenizer: /iopsstor/scratch/cscs/abollengier/models/FsfairX-LLaMA3-RM-v0.1
+    local_files_only: True

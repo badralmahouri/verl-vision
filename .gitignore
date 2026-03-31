@@ -67,7 +67,6 @@ output.txt
 
 # Django stuff:
 *.log
-!slurm/logs/*.log
 local_settings.py
 
 # Flask stuff:
@@ -150,8 +149,8 @@ core_*
 data/bbox/
 data/blur/
 
-# Per-run plots — tracked so teammates can review training results
-# slurm/plots/*/
+# Per-run plots (regenerable from metrics logs via plot.py)
+slurm/plots/*/
 
 # Backup files
 *.bak

@@ -292,6 +292,10 @@ class SGLangHttpServer:
         sampling_params["max_new_tokens"] = max_new_tokens
         return_logprob = sampling_params.pop("logprobs", False)
 
+        # Strip internal keys that SGLang doesn't understand before building
+        # the request (SGLang unpacks sampling_params into SamplingParams()).
+        sampling_params.pop("_global_step", None)
+
         request = GenerateReqInput(
             rid=request_id,
             input_ids=prompt_ids,

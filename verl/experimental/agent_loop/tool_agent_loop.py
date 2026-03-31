@@ -144,6 +144,21 @@ class ToolAgentLoop(AgentLoopBase):
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput:
         messages = list(kwargs["raw_prompt"])
 
+        # Add model-specific stop tokens so SGLang stops generation at end-of-turn.
+        # Apertus uses <|assistant_end|> (not </s>) to signal end-of-response,
+        # and <|tools_suffix|> to signal end-of-tool-call.
+        if self.tool_parser_name == "apertus" and "stop_token_ids" not in sampling_params:
+            stop_ids = [
+                self.tokenizer.convert_tokens_to_ids("<|assistant_end|>"),
+                self.tokenizer.convert_tokens_to_ids("<|tools_suffix|>"),
+            ]
+            sampling_params["stop_token_ids"] = [
+                tid for tid in stop_ids if tid is not None and tid != self.tokenizer.unk_token_id
+            ]
+
+        # Save global step for the Apertus forced-prefix curriculum.
+        self._apertus_global_step = sampling_params.pop("_global_step", 0)
+
         # extract images and videos from messages
         if self.vq_model is not None:
             # Apertus path: load images from dataset's "images" field (file paths)
@@ -228,6 +243,43 @@ class ToolAgentLoop(AgentLoopBase):
         output.extra_fields.update({"turn_scores": agent_data.turn_scores, "tool_rewards": agent_data.tool_rewards})
         return output
 
+    def _get_apertus_forced_prefix_ids(self) -> list[int] | None:
+        """Return forced tool-call prefix token IDs for Apertus.
+
+        The model has no tool-calling prior (confirmed: it never generates
+        <|tools_prefix|> even with +20 logit bias).  We bootstrap tool use
+        by prepending part of the tool-call structure so the model only needs
+        to generate the remaining tokens (e.g. bounding box coordinates).
+
+        Curriculum (gradually gives more autonomy):
+          steps 0-19:  full prefix — model completes bbox values
+          steps 20-39: partial — model completes JSON body
+          steps 40-59: minimal — model generates full tool call after token
+          steps 60+:   no prefix — model on its own
+        """
+        if self.tool_parser_name != "apertus":
+            return None
+        step = getattr(self, "_apertus_global_step", 0)
+
+        # <|tools_prefix|> is a special token (ID 71) — must use
+        # convert_tokens_to_ids, not encode(), to get the right ID.
+        tp_id = self.tokenizer.convert_tokens_to_ids("<|tools_prefix|>")
+        if tp_id is None or tp_id == self.tokenizer.unk_token_id:
+            return None
+
+        if step < 20:
+            # Full prefix: model only needs to complete the bbox coordinates
+            json_text = '[{"image_bbox_tool": {"bbox_2d": ['
+            text_ids = self.tokenizer.encode(json_text, add_special_tokens=False)
+            return [tp_id] + text_ids
+        elif step < 40:
+            json_text = '[{"image_bbox_tool": '
+            text_ids = self.tokenizer.encode(json_text, add_special_tokens=False)
+            return [tp_id] + text_ids
+        elif step < 60:
+            return [tp_id]
+        return None
+
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: dict[str, Any]) -> AgentState:
         """Handle the pending state: prepare the prompt and start generation."""
         prompt_ids = await self.apply_chat_template(
@@ -236,6 +288,19 @@ class ToolAgentLoop(AgentLoopBase):
             images=agent_data.image_data,
             videos=agent_data.video_data,
         )
+
+        # Apertus forced prefix: append tool-call structure tokens to the
+        # prompt so the model generates after them.  Also store prefix IDs
+        # so the tool parser can reconstruct the full tool call.
+        prefix_ids = self._get_apertus_forced_prefix_ids()
+        self._apertus_forced_prefix_ids = None  # reset each turn
+        if prefix_ids is not None and agent_data.assistant_turns == 0:
+            prompt_ids = prompt_ids + prefix_ids
+            self._apertus_forced_prefix_ids = prefix_ids
+            # Mark prefix as part of the response region with mask=0
+            # so the final response_ids include them but no gradient.
+            agent_data.response_mask += [0] * len(prefix_ids)
+
         agent_data.prompt_ids = prompt_ids
         return AgentState.GENERATING
 
@@ -272,8 +337,13 @@ class ToolAgentLoop(AgentLoopBase):
         if self.max_user_turns and agent_data.user_turns >= self.max_user_turns:
             return AgentState.TERMINATED
 
-        # Extract tool calls
-        _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(agent_data.response_ids)
+        # Extract tool calls.  When the Apertus forced prefix is active,
+        # the prefix tokens are in prompt_ids (not response_ids), so the
+        # parser wouldn't see <|tools_prefix|>.  Prepend them for parsing.
+        parse_ids = agent_data.response_ids
+        if hasattr(self, "_apertus_forced_prefix_ids") and self._apertus_forced_prefix_ids:
+            parse_ids = self._apertus_forced_prefix_ids + list(agent_data.response_ids)
+        _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(parse_ids)
 
         # Handle interaction if needed
         if self.interaction_config_file:
@@ -375,16 +445,14 @@ class ToolAgentLoop(AgentLoopBase):
                 None, lambda: self.tokenizer.encode(tool_response_text, add_special_tokens=False)
             )
         elif self.tool_parser_name == "apertus":
-            # Apertus model expects tool results as [content1, content2] inside
-            # the assistant turn, then <|assistant_end|><|assistant_start|> to
-            # start the next generation turn.
+            # Apertus model's training format: tool results appear as [content]
+            # inside the assistant turn (no end/start boundary).  The model
+            # continues generating in the same assistant turn after the result.
             tool_results_text = "[" + ", ".join(msg["content"] for msg in add_messages) + "]"
             tool_ids = await self.loop.run_in_executor(
                 None, lambda: self.tokenizer.encode(tool_results_text, add_special_tokens=False)
             )
-            end_id = self.tokenizer.convert_tokens_to_ids("<|assistant_end|>")
-            start_id = self.tokenizer.convert_tokens_to_ids("<|assistant_start|>")
-            response_ids = tool_ids + [end_id, start_id]
+            response_ids = tool_ids
         else:
             response_ids = await self.apply_chat_template(
                 add_messages,

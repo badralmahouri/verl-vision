@@ -493,6 +493,7 @@ class AgentLoopWorkerBase:
             top_p=config.top_p,
             repetition_penalty=1.0,
             logprobs=config.calculate_log_probs,
+            _global_step=batch.meta_info.get("global_steps", 0),
         )
 
         # override sampling params for validation

@@ -143,3 +143,19 @@ data/refcoco_raw/
 
 # Core dumps
 core_*
+
+# Generated datasets (regenerable from data/*.py scripts)
+data/bbox/
+data/blur/
+
+# Run-specific plot subdirectories (keep top-level plots)
+slurm/plots/*/
+
+# Backup files
+*.bak
+
+# TensorBoard logs
+tensorboard_log/
+
+# Research papers for exploration
+papers/

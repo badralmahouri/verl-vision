@@ -67,6 +67,7 @@ output.txt
 
 # Django stuff:
 *.log
+!slurm/logs/*.log
 local_settings.py
 
 # Flask stuff:
@@ -134,11 +135,12 @@ ENV/
 slurm/slurm/
 notebooks/data_image.ipynb
 scripts/Alexis/data_bbox.py
-*.png
+# Images — only ignore in data/output dirs, not globally (allows diagrams/figures)
+data/**/*.png
+data/**/*.jpg
 events.out.tfevents.*
 *.err
 *.out
-*.jpg
 data/refcoco_raw/
 
 # Core dumps
@@ -148,8 +150,8 @@ core_*
 data/bbox/
 data/blur/
 
-# Run-specific plot subdirectories (keep top-level plots)
-slurm/plots/*/
+# Per-run plots — tracked so teammates can review training results
+# slurm/plots/*/
 
 # Backup files
 *.bak
@@ -157,5 +159,8 @@ slurm/plots/*/
 # TensorBoard logs
 tensorboard_log/
 
-# Research papers for exploration
-papers/
+# Research papers — tracked so teammates share the same reading list
+# papers/
+
+*.pdf
+!papers/**/*.pdf
